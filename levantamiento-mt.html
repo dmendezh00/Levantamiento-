@@ -239,11 +239,12 @@ button{cursor:pointer}
 
     <fieldset class="sec"><legend>Fotos</legend>
       <div class="dos">
-        <button type="button" class="btn sec" id="f-btn-cam">Cámara</button>
-        <button type="button" class="btn sec" id="f-btn-gal">Galería</button>
+        <button type="button" class="btn sec" id="f-btn-cam">+ Tomar foto</button>
+        <button type="button" class="btn sec" id="f-btn-gal">+ Galería</button>
       </div>
       <input type="file" id="f-cam" accept="image/*" capture="environment" hidden>
       <input type="file" id="f-gal" accept="image/*" multiple hidden>
+      <p class="nota" id="f-nfotos" style="font-weight:500;color:var(--muted)"></p>
       <div class="fotos" id="f-fotos"></div>
     </fieldset>
   </form>
@@ -389,6 +390,8 @@ function detalles(p) {
   add("Observaciones", p.obs);
   return d;
 }
+const limpio = t => String(t).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+const nombreFoto = (p, i) => `${limpio(p.nombre) || "poste_" + p.numero}_${i + 1}.jpg`;
 function filasExport(l, p) {
   const f = [["Número", p.numero]];
   if (l.circuito) f.push(["Circuito", l.circuito]);
@@ -398,7 +401,7 @@ function filasExport(l, p) {
   f.push(...detalles(p));
   const v = vano(l, p);
   if (v != null) f.push([`Vano desde ${anterior(l, p).nombre}`, `${v.toFixed(1)} m`]);
-  if (p.fotos.length) f.push(["Fotos", p.fotos.length]);
+  if (p.fotos.length) f.push(["Fotos", p.fotos.map((_, i) => nombreFoto(p, i)).join(", ")]);
   return f.map(([k, v]) => [k, String(v)]);
 }
 
@@ -610,7 +613,11 @@ async function verPoste(p) {
     ${v != null ? `<p class="nota">Vano desde ${esc(anterior(lev, p).nombre)}: <span class="mono">${v.toFixed(1)} m</span></p>` : ""}
     <dl class="det">${detalles(p).map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>
     ${p.fotos.length ? `<div class="miniaturas">${p.fotos.map(id => `<img data-foto="${esc(id)}" alt="Foto del poste">`).join("")}</div>` : ""}
-    <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn pri" id="d-editar">Editar</button></div>`);
+    <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn sec" id="d-wa">WhatsApp</button><button class="btn pri" id="d-editar">Editar</button></div>`);
+  $("#d-wa", h).onclick = async () => {
+    try { await compartirWhatsApp(textoPoste(lev, p), await archivosFoto([p])); }
+    catch (e) { toast("No se pudo compartir: " + e.message); }
+  };
   $("#d-editar", h).onclick = () => { cerrarHoja(); abrirForm(p, false); };
   $("#d-borrar", h).onclick = async () => {
     cerrarHoja();
@@ -720,6 +727,8 @@ function renderForm() {
 }
 
 function renderFotosForm() {
+  const n = fFotos.length;
+  IN("nfotos").textContent = n ? `${n} ${n === 1 ? "foto" : "fotos"}. Puedes agregar todas las que necesites.` : "Agrega una o varias fotos del poste.";
   IN("fotos").innerHTML = fFotos.map(id => `<div class="f"><img data-foto="${esc(id)}" alt="Foto del poste"><button type="button" class="x" data-quitar="${esc(id)}" aria-label="Quitar foto">✕</button></div>`).join("");
   cargarMiniaturas(IN("fotos"));
 }
@@ -734,6 +743,7 @@ async function agregarFotos(files) {
     } catch (e) { toast("No se pudo guardar la foto: " + e.message); }
   }
   renderFotosForm();
+  if (files.length) toast(`Foto ${fFotos.length} agregada. Toca "+ Tomar foto" para otra.`);
 }
 
 async function cancelarForm() {
@@ -797,7 +807,7 @@ function gpx(l) {
 
 // colores KML: aabbggrr
 const KML_COLOR = { Bueno: "ff3e8a2b", Regular: "ff0077e6", Malo: "ff2a2ac9", Reemplazar: "ffe84870" };
-function kml(l, conFotos) {
+function kml(l) {
   const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2">', "<Document>",
     `<name>${escX(l.nombre)}</name>`];
   if (l.circuito) out.push(`<description>Circuito ${escX(l.circuito)}</description>`);
@@ -810,7 +820,6 @@ function kml(l, conFotos) {
   for (const p of ordenados(l)) {
     const filas = filasExport(l, p);
     let html = "<table>" + filas.map(([k, v]) => `<tr><td><b>${escX(k)}</b></td><td>${escX(v).replace(/\n/g, "<br/>")}</td></tr>`).join("") + "</table>";
-    if (conFotos) html += p.fotos.map(id => `<br/><img src="fotos/${escX(id)}.jpg" width="320"/>`).join("");
     const estilo = KML_COLOR[p.estado] ? p.estado.toLowerCase() : "bueno";
     out.push("<Placemark>", `<name>${escX(p.nombre)}</name>`, `<description><![CDATA[${html}]]></description>`, `<styleUrl>#e_${estilo}</styleUrl>`, "<ExtendedData>");
     for (const [k, v] of filas) out.push(`<Data name="${escX(k)}"><value>${escX(v)}</value></Data>`);
@@ -834,12 +843,67 @@ function kml(l, conFotos) {
 
 async function kmz(l) {
   const zip = new JSZip();
-  zip.file("doc.kml", kml(l, true));
-  for (const p of l.postes) for (const id of p.fotos) {
-    const rec = await DB.get("fotos", id);
-    if (rec) zip.file(`fotos/${id}.jpg`, rec.blob);
-  }
+  zip.file("doc.kml", kml(l));
   return zip.generateAsync({ type: "blob", mimeType: "application/vnd.google-earth.kmz" });
+}
+
+// Carpeta de fotos: una subcarpeta por poste (P-001/P-001_1.jpg) y una lista en CSV
+async function zipFotos(l) {
+  const zip = new JSZip();
+  const raiz = zip.folder(`Fotos_${limpio(l.nombre) || "levantamiento"}`);
+  const csv = ["Numero,Poste,Latitud,Longitud,Estado,Fotos"];
+  let total = 0;
+  for (const p of ordenados(l)) {
+    csv.push([p.numero, `"${p.nombre.replace(/"/g, '""')}"`, p.lat.toFixed(6), p.lon.toFixed(6), p.estado, p.fotos.length].join(","));
+    if (!p.fotos.length) continue;
+    const carpeta = raiz.folder(limpio(p.nombre) || "poste_" + p.numero);
+    for (let i = 0; i < p.fotos.length; i++) {
+      const rec = await DB.get("fotos", p.fotos[i]);
+      if (rec) { carpeta.file(nombreFoto(p, i), rec.blob); total++; }
+    }
+  }
+  raiz.file("lista_postes.csv", "\ufeff" + csv.join("\n"));
+  if (!total) throw new Error("no hay fotos en este levantamiento");
+  return zip.generateAsync({ type: "blob", mimeType: "application/zip" });
+}
+
+async function archivosFoto(postes) {
+  const out = [];
+  for (const p of postes) for (let i = 0; i < p.fotos.length; i++) {
+    const rec = await DB.get("fotos", p.fotos[i]);
+    if (rec) out.push(new File([rec.blob], nombreFoto(p, i), { type: "image/jpeg" }));
+  }
+  return out;
+}
+
+const linkMaps = p => `https://maps.google.com/?q=${p.lat.toFixed(6)},${p.lon.toFixed(6)}`;
+function textoPoste(l, p) {
+  return [`*${p.nombre}* (${l.nombre})`, ...detalles(p).map(([k, v]) => `${k}: ${v}`), `Ubicación: ${linkMaps(p)}`].join("\n");
+}
+function textoResumen(l) {
+  const o = ordenados(l);
+  const lineas = [`*${l.nombre}*${l.circuito ? " · Circuito " + l.circuito : ""}`,
+    `${o.length} postes · línea ${fmtDist(longLinea(l))}`, ""];
+  for (const p of o) {
+    const v = vano(l, p);
+    lineas.push(`${p.nombre}: ${[p.tipoPoste, p.altura != null && numFmt(p.altura) + " " + p.unidadAltura, p.primaria, p.transformador && "transf. " + (p.kva ? p.kva + " kVA" : ""), p.estado !== "Bueno" && p.estado, v != null && "vano " + Math.round(v) + " m"].filter(Boolean).join(", ")} ${linkMaps(p)}`);
+  }
+  let t = lineas.join("\n");
+  if (t.length > 6000) t = t.slice(0, 6000) + "\n… (lista recortada; envía el KMZ para el detalle completo)";
+  return t;
+}
+
+// WhatsApp: imágenes y texto se comparten directo; KMZ/KML/GPX dependen del teléfono.
+async function compartirWhatsApp(texto, archivos = []) {
+  if (archivos.length && navigator.canShare?.({ files: archivos })) {
+    try { await navigator.share({ files: archivos, text: texto }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  if (!archivos.length && navigator.share) {
+    try { await navigator.share({ text: texto }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  window.open("https://wa.me/?text=" + encodeURIComponent(texto), "_blank");
 }
 
 function blobADataURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
@@ -860,14 +924,14 @@ async function entregar(blob, nombre, compartir) {
     const file = new File([blob], nombre, { type: blob.type || "application/octet-stream" });
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre }); return; }
-      toast("Este teléfono no permite compartir este tipo de archivo; se descargará.");
+      toast("El teléfono no deja compartir este tipo de archivo directo. Se descargó: ábrelo desde Descargas y compártelo por WhatsApp.");
     } catch (e) { if (e.name === "AbortError") return; }
   }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = nombre;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
-  toast("Descargado en tu carpeta de Descargas: " + nombre);
+  if (!compartir) toast("Descargado en tu carpeta de Descargas: " + nombre);
 }
 
 function menuExportar() {
@@ -875,10 +939,16 @@ function menuExportar() {
   const h = abrirHoja(`
     <h2>Exportar</h2><p>${lev.postes.length} postes · ${fmtDist(longLinea(lev))} de línea</p>
     <div class="opciones">
-      <button data-f="kmz"><b>KMZ con fotos</b><span>Google Earth, con las fotos dentro de cada poste</span></button>
+      <button data-f="kmz"><b>KMZ</b><span>Google Earth (solo el mapa, sin fotos)</span></button>
+      <button data-f="fotos"><b>Carpeta de fotos (.zip)</b><span>Una carpeta por poste: P-001_1.jpg, P-001_2.jpg… y lista de postes</span></button>
       <button data-f="kml"><b>KML</b><span>Google Earth, QGIS, AutoCAD Map, Global Mapper</span></button>
       <button data-f="gpx"><b>GPX</b><span>GPS de mano, apps de navegación</span></button>
       <button data-f="json"><b>Respaldo completo</b><span>Para guardar o pasar a otro teléfono (incluye fotos)</span></button>
+    </div>
+    <h2 style="margin-top:18px">WhatsApp</h2>
+    <div class="opciones">
+      <button data-w="resumen"><b>Enviar resumen</b><span>Lista de postes con datos y ubicación en Google Maps</span></button>
+      <button data-w="fotos"><b>Enviar fotos</b><span>Todas las fotos, con el nombre del poste en cada archivo</span></button>
     </div>
     <label class="switch" style="margin-top:12px"><input type="checkbox" id="x-compartir" checked> Compartir (WhatsApp, correo, Drive) en lugar de descargar</label>`);
   $$("[data-f]", h).forEach(b => b.onclick = async () => {
@@ -891,9 +961,23 @@ function menuExportar() {
       if (f === "gpx") blob = new Blob([gpx(lev)], { type: "application/gpx+xml" });
       else if (f === "kml") blob = new Blob([kml(lev, false)], { type: "application/vnd.google-earth.kml+xml" });
       else if (f === "kmz") blob = await kmz(lev);
+      else if (f === "fotos") blob = await zipFotos(lev);
       else blob = new Blob([await respaldo(lev)], { type: "application/json" });
-      await entregar(blob, nombreArchivo(lev, f === "json" ? "json" : f), compartir);
+      const ext = f === "json" ? "json" : f === "fotos" ? "zip" : f;
+      await entregar(blob, (f === "fotos" ? "Fotos_" : "") + nombreArchivo(lev, ext), compartir);
     } catch (e) { toast("No se pudo exportar: " + e.message); }
+  });
+  $$("[data-w]", h).forEach(b => b.onclick = async () => {
+    const w = b.dataset.w;
+    cerrarHoja();
+    try {
+      if (w === "resumen") return compartirWhatsApp(textoResumen(lev));
+      toast("Preparando fotos…");
+      const archivos = await archivosFoto(ordenados(lev));
+      if (!archivos.length) { toast("Todavía no hay fotos en este levantamiento"); return; }
+      if (!navigator.canShare?.({ files: archivos })) { toast("Este navegador no deja compartir fotos directo; usa Carpeta de fotos (.zip)"); return; }
+      await compartirWhatsApp(`Fotos · ${lev.nombre}`, archivos);
+    } catch (e) { toast("No se pudo compartir: " + e.message); }
   });
 }
 
