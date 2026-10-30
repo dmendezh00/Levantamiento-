@@ -894,6 +894,38 @@ function textoResumen(l) {
 }
 
 // WhatsApp: imágenes y texto se comparten directo; KMZ/KML/GPX dependen del teléfono.
+// Cuando el teléfono no deja compartir el archivo directo: ya quedó en Descargas,
+// abrimos WhatsApp y mostramos cómo adjuntarlo.
+function guiaWhatsApp(nombre) {
+  const texto = lev ? `${lev.nombre}: te envío el archivo ${nombre}` : `Archivo ${nombre}`;
+  abrirHoja(`
+    <h2>Listo para WhatsApp</h2>
+    <p>El archivo ya está en tu carpeta <b>Descargas</b>:</p>
+    <p class="mono" style="color:var(--fg);overflow-wrap:anywhere">${esc(nombre)}</p>
+    <ol style="margin:0 0 4px;padding-left:20px;display:flex;flex-direction:column;gap:6px">
+      <li>Toca <b>Abrir WhatsApp</b> y elige el chat.</li>
+      <li>Toca el clip 📎 y luego <b>Documento</b>.</li>
+      <li>Busca <b>${esc(nombre)}</b> (sale de primero en recientes) y envíalo.</li>
+    </ol>
+    <div class="botones">
+      <button class="btn sec" type="button" id="g-cerrar">Cerrar</button>
+      <a class="btn pri" style="text-decoration:none;background:#25d366;color:#08310f" href="https://wa.me/?text=${encodeURIComponent(texto)}" target="_blank" rel="noopener">Abrir WhatsApp</a>
+    </div>`);
+  $("#g-cerrar").onclick = cerrarHoja;
+}
+
+async function generarArchivo(f) {
+  await guardar();
+  let blob;
+  if (f === "gpx") blob = new Blob([gpx(lev)], { type: "application/gpx+xml" });
+  else if (f === "kml") blob = new Blob([kml(lev)], { type: "application/vnd.google-earth.kml+xml" });
+  else if (f === "kmz") blob = await kmz(lev);
+  else if (f === "fotos") blob = await zipFotos(lev);
+  else blob = new Blob([await respaldo(lev)], { type: "application/json" });
+  const ext = f === "json" ? "json" : f === "fotos" ? "zip" : f;
+  return { blob, nombre: (f === "fotos" ? "Fotos_" : "") + nombreArchivo(lev, ext) };
+}
+
 async function compartirWhatsApp(texto, archivos = []) {
   if (archivos.length && navigator.canShare?.({ files: archivos })) {
     try { await navigator.share({ files: archivos, text: texto }); return; }
@@ -920,18 +952,20 @@ function nombreArchivo(l, ext) {
 }
 
 async function entregar(blob, nombre, compartir) {
+  let compartido = false;
   if (compartir) {
     const file = new File([blob], nombre, { type: blob.type || "application/octet-stream" });
     try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre }); return; }
-      toast("El teléfono no deja compartir este tipo de archivo directo. Se descargó: ábrelo desde Descargas y compártelo por WhatsApp.");
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre }); compartido = true; }
     } catch (e) { if (e.name === "AbortError") return; }
+    if (compartido) return;
   }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = nombre;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
-  if (!compartir) toast("Descargado en tu carpeta de Descargas: " + nombre);
+  if (compartir) guiaWhatsApp(nombre);
+  else toast("Descargado en tu carpeta de Descargas: " + nombre);
 }
 
 function menuExportar() {
@@ -945,27 +979,34 @@ function menuExportar() {
       <button data-f="gpx"><b>GPX</b><span>GPS de mano, apps de navegación</span></button>
       <button data-f="json"><b>Respaldo completo</b><span>Para guardar o pasar a otro teléfono (incluye fotos)</span></button>
     </div>
-    <h2 style="margin-top:18px">WhatsApp</h2>
+    <h2 style="margin-top:18px">Enviar por WhatsApp</h2>
+    <div class="chips" style="margin-bottom:10px">
+      <button type="button" data-wf="kmz">KMZ</button>
+      <button type="button" data-wf="kml">KML</button>
+      <button type="button" data-wf="gpx">GPX</button>
+      <button type="button" data-wf="fotos">Carpeta de fotos</button>
+    </div>
     <div class="opciones">
       <button data-w="resumen"><b>Enviar resumen</b><span>Lista de postes con datos y ubicación en Google Maps</span></button>
       <button data-w="fotos"><b>Enviar fotos</b><span>Todas las fotos, con el nombre del poste en cada archivo</span></button>
     </div>
-    <label class="switch" style="margin-top:12px"><input type="checkbox" id="x-compartir" checked> Compartir (WhatsApp, correo, Drive) en lugar de descargar</label>`);
+    <label class="switch" style="margin-top:12px"><input type="checkbox" id="x-compartir"> Al exportar, abrir el menú de compartir en lugar de solo descargar</label>`);
   $$("[data-f]", h).forEach(b => b.onclick = async () => {
     const f = b.dataset.f, compartir = $("#x-compartir", h).checked;
     cerrarHoja();
     toast("Preparando archivo…");
     try {
-      await guardar();
-      let blob;
-      if (f === "gpx") blob = new Blob([gpx(lev)], { type: "application/gpx+xml" });
-      else if (f === "kml") blob = new Blob([kml(lev, false)], { type: "application/vnd.google-earth.kml+xml" });
-      else if (f === "kmz") blob = await kmz(lev);
-      else if (f === "fotos") blob = await zipFotos(lev);
-      else blob = new Blob([await respaldo(lev)], { type: "application/json" });
-      const ext = f === "json" ? "json" : f === "fotos" ? "zip" : f;
-      await entregar(blob, (f === "fotos" ? "Fotos_" : "") + nombreArchivo(lev, ext), compartir);
+      const { blob, nombre } = await generarArchivo(f);
+      await entregar(blob, nombre, compartir);
     } catch (e) { toast("No se pudo exportar: " + e.message); }
+  });
+  $$("[data-wf]", h).forEach(b => b.onclick = async () => {
+    cerrarHoja();
+    toast("Preparando archivo…");
+    try {
+      const { blob, nombre } = await generarArchivo(b.dataset.wf);
+      await entregar(blob, nombre, true);
+    } catch (e) { toast("No se pudo preparar: " + e.message); }
   });
   $$("[data-w]", h).forEach(b => b.onclick = async () => {
     const w = b.dataset.w;
