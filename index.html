@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e8590c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Levantamiento MT</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Herramienta de campo: mapa a pantalla completa, controles grandes al alcance del pulgar,
+   naranja de alta visibilidad como acento, neutros pizarra. */
+:root{
+  --bg:#eef1f4; --surface:#ffffff; --surface-2:#f4f6f8; --fg:#14202b; --muted:#5b6b7a; --line:#d3dae1;
+  --accent:#e8590c; --accent-fg:#ffffff; --accent-soft:#fde8da;
+  --track:#1971c2; --linea:#e8590c;
+  --ok:#2b8a3e; --warn:#e67700; --bad:#c92a2a; --rep:#7048e8;
+  --shadow:0 2px 12px rgba(20,32,43,.20);
+  --f-ui:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-head:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px); --safe-r:env(safe-area-inset-right,0px);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f161d; --surface:#18222c; --surface-2:#1f2b36; --fg:#e6edf3; --muted:#94a4b3; --line:#2d3b48;
+  --accent:#ff7a2e; --accent-fg:#1c0e05; --accent-soft:#3b2517; --track:#4dabf7; --linea:#ff7a2e;
+  --ok:#51cf66; --warn:#fcc419; --bad:#ff6b6b; --rep:#9775fa;
+  --shadow:0 2px 14px rgba(0,0,0,.5); color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.4 var(--f-ui);-webkit-tap-highlight-color:transparent;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+
+.vista{position:fixed;inset:0;display:flex;flex-direction:column}
+.barra{display:flex;align-items:center;gap:8px;background:var(--surface);border-bottom:1px solid var(--line);
+  padding:calc(8px + var(--safe-t)) max(12px,var(--safe-r)) 8px max(12px,var(--safe-l));min-height:56px;z-index:500}
+.barra h1{font:700 1.5rem/1 var(--f-head);letter-spacing:.01em;margin:0;flex:1}
+.titulo{flex:1;min-width:0;display:flex;flex-direction:column}
+.titulo strong{font:700 1.2rem/1.15 var(--f-head);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.titulo small{color:var(--muted);font-size:.8rem}
+.icono{width:44px;height:44px;border:0;border-radius:10px;background:transparent;display:grid;place-items:center;flex:none}
+.icono:active{background:var(--surface-2)}
+.icono svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+.btn{min-height:52px;border-radius:12px;border:1px solid transparent;padding:0 18px;font-weight:600;font-size:1rem;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.pri{background:var(--accent);color:var(--accent-fg)}
+.btn.sec{background:var(--surface-2);border-color:var(--line)}
+.btn.peligro{background:var(--bad);color:#fff}
+.btn:active{filter:brightness(.92)}
+.btn-txt{border:0;background:none;color:var(--accent);font-weight:600;padding:8px}
+
+/* Lista de levantamientos */
+.lista{flex:1;overflow:auto;padding:12px max(16px,var(--safe-r)) calc(100px + var(--safe-b)) max(16px,var(--safe-l));display:flex;flex-direction:column;gap:10px}
+.lev{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
+.lev .txt{flex:1;min-width:0}
+.lev h3{margin:0;font:700 1.15rem/1.2 var(--f-head)}
+.lev p{margin:2px 0 0;color:var(--muted);font-size:.88rem}
+.lev .abrir{all:unset;flex:1;min-width:0;cursor:pointer}
+.vacio{margin:auto;text-align:center;color:var(--muted);max-width:30ch}
+.vacio b{display:block;color:var(--fg);font:700 1.3rem var(--f-head);margin-bottom:6px}
+.fab-ext{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + var(--safe-b));box-shadow:var(--shadow);z-index:10}
+
+/* Mapa */
+#mapa{flex:1;background:var(--surface-2)}
+.leaflet-container{font-family:var(--f-ui)}
+.info{position:absolute;top:calc(64px + var(--safe-t));left:max(10px,var(--safe-l));right:max(10px,var(--safe-r));z-index:450;
+  background:var(--surface);border-radius:12px;box-shadow:var(--shadow);padding:8px 12px;display:flex;align-items:center;gap:10px;font-size:.88rem}
+.info #info-txt{flex:1;min-width:0}
+.rec{width:10px;height:10px;border-radius:50%;background:var(--bad);animation:lat 1.2s infinite;flex:none}
+@keyframes lat{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.rec{animation:none}}
+.gps{font:500 .82rem var(--f-mono);padding:4px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.gps.ok{color:var(--ok)} .gps.med{color:var(--warn)} .gps.mal{color:var(--bad)}
+.flotantes{position:absolute;right:max(12px,var(--safe-r));bottom:calc(96px + var(--safe-b));z-index:450;display:flex;flex-direction:column;gap:10px}
+.flotantes button{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);display:grid;place-items:center;font-size:.7rem;font-weight:700}
+.flotantes svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+.flotantes button.on{color:var(--accent)}
+.acciones{display:flex;gap:10px;background:var(--surface);border-top:1px solid var(--line);
+  padding:10px max(12px,var(--safe-r)) calc(10px + var(--safe-b)) max(12px,var(--safe-l));z-index:500}
+.acciones .btn{flex:1} .acciones .pri{flex:2}
+.acciones .grabando{border-color:var(--bad);color:var(--bad)}
+
+.poste{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);
+  display:grid;place-items:center;color:#fff;font:700 12px var(--f-mono);position:relative}
+.poste .tr{position:absolute;top:-5px;right:-5px;width:15px;height:15px;border-radius:50%;background:#ffd43b;color:#111;font-size:10px;line-height:15px;text-align:center;border:1px solid #fff}
+.e-Bueno{background:#2b8a3e} .e-Regular{background:#e67700} .e-Malo{background:#c92a2a} .e-Reemplazar{background:#7048e8}
+.yo{width:18px;height:18px;border-radius:50%;background:#1c7ed6;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25),0 1px 4px rgba(0,0,0,.4)}
+
+/* Hoja inferior y velo */
+#velo{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:900}
+.hoja{position:fixed;left:0;right:0;bottom:0;z-index:950;background:var(--surface);border-radius:18px 18px 0 0;max-height:88%;overflow:auto;
+  padding:8px max(18px,var(--safe-r)) calc(18px + var(--safe-b)) max(18px,var(--safe-l));box-shadow:var(--shadow)}
+.asa{width:40px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 12px}
+.hoja h2{font:700 1.4rem/1.15 var(--f-head);margin:0 0 6px;text-wrap:balance}
+.hoja p{margin:0 0 12px;color:var(--muted)}
+.botones{display:flex;gap:10px;margin-top:16px}.botones .btn{flex:1}
+.opciones{display:flex;flex-direction:column;gap:8px}
+.opciones button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.opciones button b{font-size:1rem} .opciones button span{font-size:.85rem;color:var(--muted)}
+.det{display:grid;grid-template-columns:minmax(110px,40%) 1fr;gap:6px 12px;margin:10px 0;font-size:.95rem}
+.det dt{color:var(--muted)} .det dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.cab{display:flex;align-items:center;gap:12px}
+.miniaturas{display:flex;gap:8px;overflow-x:auto;padding:4px 0}
+.miniaturas img{width:88px;height:88px;object-fit:cover;border-radius:10px;flex:none;background:var(--surface-2)}
+.fila-p{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left}
+.fila-p .txt{flex:1;min-width:0}.fila-p small{color:var(--muted);display:block}
+.campo{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
+.campo input,.campo textarea{font-size:1rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:48px;width:100%}
+.campo input:focus,.campo textarea:focus{border-color:var(--accent);outline:none}
+.pila{display:flex;flex-direction:column;gap:12px}
+
+/* Formulario del poste */
+.panel{position:fixed;inset:0;z-index:800;background:var(--bg);display:flex;flex-direction:column}
+.form{flex:1;overflow:auto;padding:10px max(12px,var(--safe-r)) 24px max(12px,var(--safe-l));display:flex;flex-direction:column;gap:10px}
+.sec{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:12px 14px 14px;margin:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.sec legend{font:700 .8rem var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--accent);padding:0 6px;margin-left:-6px}
+.nota{margin:0;font-size:.9rem;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{min-height:40px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);font-weight:500}
+.chips button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--fg);font-weight:700}
+.chips.estado button[aria-pressed="true"]{color:#fff;border-color:transparent}
+.chips.rapidas button{min-height:34px;font:500 .85rem var(--f-mono)}
+.fila{display:flex;gap:10px;align-items:flex-end}.crece{flex:1;min-width:0}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
+.seg button{min-width:52px;min-height:48px;border:0;background:var(--surface-2);font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
+.contador{display:flex;align-items:center;gap:8px}
+.contador span{flex:1}
+.contador button{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface-2);font-size:1.3rem;line-height:1}
+.contador output{min-width:32px;text-align:center;font:600 1.2rem var(--f-mono)}
+.switch{display:flex;align-items:center;gap:12px;font-weight:500;min-height:44px}
+.switch input{width:24px;height:24px;accent-color:var(--accent)}
+.fotos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fotos .f{position:relative;aspect-ratio:1;max-width:100%}
+.fotos img{width:100%;height:100%;object-fit:cover;border-radius:10px;background:var(--surface-2)}
+.fotos .x{position:absolute;top:4px;right:4px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:15px}
+.dos{display:flex;gap:10px}.dos .btn{flex:1}
+.pie{background:var(--surface);border-top:1px solid var(--line);padding:10px max(12px,var(--safe-r)) calc(10px + var(--safe-b)) max(12px,var(--safe-l))}
+.ancho{width:100%}
+.visor{position:fixed;inset:0;z-index:1000;background:#000;display:grid;place-items:center}
+.visor img{max-width:100%;max-height:100%;object-fit:contain}
+.visor button{position:absolute;top:calc(10px + var(--safe-t));right:max(10px,var(--safe-r));width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:20px}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + var(--safe-b));z-index:1100;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:.92rem;max-width:calc(100% - 32px);box-shadow:var(--shadow)}
+</style>
+</head>
+<body>
+
+<section id="v-lista" class="vista">
+  <header class="barra">
+    <h1>Levantamientos</h1>
+    <button id="btn-importar" class="btn-txt" type="button">Importar respaldo</button>
+  </header>
+  <div id="lista-levs" class="lista"></div>
+  <button id="btn-nuevo" class="btn pri fab-ext" type="button">+ Nuevo levantamiento</button>
+  <input type="file" id="in-importar" accept=".json,application/json" hidden>
+</section>
+
+<section id="v-mapa" class="vista" hidden>
+  <header class="barra">
+    <button id="btn-volver" class="icono" type="button" aria-label="Volver a la lista"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="titulo"><strong id="m-nombre"></strong><small id="m-circuito"></small></div>
+    <button id="btn-lista-postes" class="icono" type="button" aria-label="Lista de postes"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1"/></svg></button>
+    <button id="btn-exportar" class="icono" type="button" aria-label="Exportar"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg></button>
+  </header>
+  <div id="mapa"></div>
+  <div class="info"><span id="rec" class="rec" hidden></span><div id="info-txt"></div><span id="gps" class="gps">Sin GPS</span></div>
+  <div class="flotantes">
+    <button id="btn-capa" type="button" aria-label="Cambiar a vista satelital">SAT</button>
+    <button id="btn-centrar" type="button" aria-label="Centrar en mi ubicación" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+  </div>
+  <div class="acciones">
+    <button id="btn-grabar" class="btn sec" type="button">● Recorrido</button>
+    <button id="btn-marcar" class="btn pri" type="button">Marcar poste</button>
+  </div>
+</section>
+
+<section id="p-form" class="panel" hidden>
+  <header class="barra">
+    <button id="f-cancelar" class="icono" type="button" aria-label="Cancelar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="titulo"><strong id="f-titulo">Nuevo poste</strong><small id="f-coords" class="mono"></small></div>
+  </header>
+  <form id="form" class="form" novalidate>
+    <fieldset class="sec"><legend>Identificación</legend>
+      <label class="campo">Nombre / número del poste<input id="f-nombre" autocomplete="off"></label>
+      <p id="f-vano" class="nota"></p>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Poste</legend>
+      <div class="chips" data-campo="tipoPoste" data-opc="tipoPoste"></div>
+      <div class="fila">
+        <label class="campo crece">Altura<input id="f-altura" inputmode="decimal" autocomplete="off"></label>
+        <div class="seg" data-campo="unidadAltura" data-opc="unidad"></div>
+      </div>
+      <div class="chips rapidas" id="f-alturas"></div>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Estructuras</legend>
+      <label class="campo">Estructura primaria<input id="f-primaria" list="dl-primaria" autocomplete="off"></label>
+      <label class="campo">Estructura secundaria<input id="f-secundaria" list="dl-secundaria" autocomplete="off"></label>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Retenidas</legend>
+      <div class="contador" data-campo="retenidas"><span>Cantidad</span><button type="button" data-d="-1" aria-label="Menos">−</button><output>0</output><button type="button" data-d="1" aria-label="Más">+</button></div>
+      <label class="campo" data-si="retenidas">Tipo de retenida<input id="f-tipoRetenida" list="dl-retenida" autocomplete="off"></label>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Alumbrado</legend>
+      <div class="contador" data-campo="lamparas"><span>Lámparas existentes</span><button type="button" data-d="-1" aria-label="Menos">−</button><output>0</output><button type="button" data-d="1" aria-label="Más">+</button></div>
+      <label class="campo" data-si="lamparas">Tipo / potencia<input id="f-tipoLampara" list="dl-lampara" autocomplete="off"></label>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Transformador</legend>
+      <label class="switch"><input type="checkbox" id="f-trafo"> Tiene transformador</label>
+      <div class="pila" data-si="transformador">
+        <label class="campo">Capacidad (kVA)<input id="f-kva" inputmode="decimal" list="dl-kva" autocomplete="off"></label>
+        <div class="chips" data-campo="fases" data-opc="fases"></div>
+      </div>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Cuchillas y protecciones</legend>
+      <div class="contador" data-campo="cuchillas"><span>Cantidad</span><button type="button" data-d="-1" aria-label="Menos">−</button><output>0</output><button type="button" data-d="1" aria-label="Más">+</button></div>
+      <label class="campo" data-si="cuchillas">Tipo<input id="f-tipoCuchilla" list="dl-cuchilla" autocomplete="off"></label>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Estado y observaciones</legend>
+      <div class="chips estado" data-campo="estado" data-opc="estado"></div>
+      <label class="campo">Observaciones<textarea id="f-obs" rows="3" placeholder="Poste inclinado, vegetación, acceso difícil…"></textarea></label>
+    </fieldset>
+
+    <fieldset class="sec"><legend>Fotos</legend>
+      <div class="dos">
+        <button type="button" class="btn sec" id="f-btn-cam">Cámara</button>
+        <button type="button" class="btn sec" id="f-btn-gal">Galería</button>
+      </div>
+      <input type="file" id="f-cam" accept="image/*" capture="environment" hidden>
+      <input type="file" id="f-gal" accept="image/*" multiple hidden>
+      <div class="fotos" id="f-fotos"></div>
+    </fieldset>
+  </form>
+  <footer class="pie"><button type="button" id="f-guardar" class="btn pri ancho">Guardar poste</button></footer>
+</section>
+
+<datalist id="dl-primaria"></datalist><datalist id="dl-secundaria"></datalist><datalist id="dl-retenida"></datalist>
+<datalist id="dl-lampara"></datalist><datalist id="dl-cuchilla"></datalist><datalist id="dl-kva"></datalist>
+
+<div id="velo" hidden></div>
+<section id="hoja" class="hoja" hidden></section>
+<div id="toast" role="status" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+// ------------------------------------------------------------ Opciones
+// Edita estas listas con los nombres que usa tu empresa.
+const OPC = {
+  tipoPoste: ["Concreto", "Madera", "Metal", "Fibra de vidrio"],
+  unidad: ["m", "ft"],
+  estado: ["Bueno", "Regular", "Malo", "Reemplazar"],
+  fases: ["1F", "2F", "3F (banco)"],
+  primaria: ["Tangente sencilla", "Tangente doble", "Ángulo", "Remate (terminal)", "Doble remate", "Derivación", "Cruce / paso aéreo", "Bandera", "Volado", "Neutro corrido"],
+  secundaria: ["Ninguna", "Bastidor 1 vía", "Bastidor 2 vías", "Bastidor 3 vías", "Bastidor 4 vías", "Remate secundario", "Cable tríplex", "Cable cuádruplex"],
+  retenida: ["Sencilla", "Doble", "Poste a poste", "De banqueta (bandera)", "De ancla"],
+  lampara: ["LED", "Sodio (HPS)", "Mercurio", "Metal halide"],
+  cuchilla: ["Cortacircuito (cut-out)", "Cuchilla seccionadora", "Pararrayos", "Reconectador"],
+  kva: ["10", "15", "25", "37.5", "50", "75", "100", "167"],
+};
+const ALTURAS = { ft: [25, 30, 35, 40, 45, 50], m: [8, 9, 10, 11, 12, 14] };
+const COLOR_ESTADO = { Bueno: "#2b8a3e", Regular: "#e67700", Malo: "#c92a2a", Reemplazar: "#7048e8" };
+const CENTRO = [14.0723, -87.1921]; // Tegucigalpa
+
+// ------------------------------------------------------------ Utilidades
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const two = n => String(n).padStart(2, "0");
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const numFmt = v => Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1);
+const fmtDist = m => m >= 1000 ? (m / 1000).toFixed(2) + " km" : Math.round(m) + " m";
+const fmtFecha = iso => { const d = new Date(iso); return `${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`; };
+const fmtFechaHora = iso => { const d = new Date(iso); return `${fmtFecha(iso)} ${two(d.getHours())}:${two(d.getMinutes())}`; };
+function dist(a, b) {
+  const R = 6371008.8, k = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * k, dLon = (b[1] - a[1]) * k;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * k) * Math.cos(b[0] * k) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+let toastT;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200);
+}
+
+// ------------------------------------------------------------ Base de datos (IndexedDB)
+// Si el navegador no permite guardar (vista previa, modo incógnito, archivo abierto
+// directamente), la app pasa a "solo memoria" en vez de quedarse congelada.
+function conTiempo(promesa, ms, msg) {
+  return Promise.race([promesa, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+}
+const DB = (() => {
+  let dbp, memoria = null;
+  const mem = () => memoria || (memoria = { levs: new Map(), fotos: new Map() });
+  const open = () => dbp || (dbp = conTiempo(new Promise((res, rej) => {
+    const r = indexedDB.open("levantamiento-mt", 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      d.createObjectStore("levs", { keyPath: "id" });
+      d.createObjectStore("fotos", { keyPath: "id" }).createIndex("lev", "levId");
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error("almacenamiento bloqueado"));
+  }), 3000, "el navegador no responde al guardar").catch(e => {
+    console.warn("Sin IndexedDB, modo memoria:", e);
+    avisoSoloMemoria();
+    return null;
+  }));
+  const clon = v => typeof structuredClone === "function" ? structuredClone(v) : (v && v.blob ? { ...v } : JSON.parse(JSON.stringify(v)));
+  async function tx(store, mode, fn, enMemoria) {
+    const d = await open();
+    if (!d) return enMemoria(mem()[store]);
+    return conTiempo(new Promise((res, rej) => {
+      const t = d.transaction(store, mode);
+      let out; const r = fn(t.objectStore(store));
+      if (r) r.onsuccess = () => { out = r.result; };
+      t.oncomplete = () => res(out);
+      t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    }), 8000, "el guardado tardó demasiado");
+  }
+  return {
+    all: s => tx(s, "readonly", st => st.getAll(), m => [...m.values()].map(clon)),
+    get: (s, k) => tx(s, "readonly", st => st.get(k), m => m.has(k) ? clon(m.get(k)) : undefined),
+    put: (s, v) => tx(s, "readwrite", st => st.put(v), m => { m.set(v.id, clon(v)); }),
+    del: (s, k) => tx(s, "readwrite", st => st.delete(k), m => { m.delete(k); }),
+    fotosDe: id => tx("fotos", "readonly", st => st.index("lev").getAll(id), m => [...m.values()].filter(f => f.levId === id)),
+  };
+})();
+let avisado = false;
+function avisoSoloMemoria() {
+  if (avisado) return; avisado = true;
+  const b = document.createElement("div");
+  b.setAttribute("role", "alert");
+  b.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:1200;background:var(--warn);color:#111;font-size:.85rem;font-weight:600;padding:calc(6px + var(--safe-t)) 44px 6px 14px";
+  b.innerHTML = 'Este navegador no deja guardar datos: lo que hagas se perderá al cerrar. Abre la app desde un enlace https en Chrome. <button aria-label="Cerrar aviso" style="position:absolute;right:6px;bottom:2px;width:36px;height:30px;border:0;background:none;font-size:18px">✕</button>';
+  b.querySelector("button").onclick = () => b.remove();
+  document.body.appendChild(b);
+}
+
+// ------------------------------------------------------------ Modelo
+const ordenados = l => [...l.postes].sort((a, b) => a.numero - b.numero);
+const sigNumero = l => l.postes.reduce((m, p) => Math.max(m, p.numero), 0) + 1;
+function anterior(l, p) {
+  let r = null;
+  for (const x of l.postes) if (x.id !== p.id && x.numero < p.numero && (!r || x.numero > r.numero)) r = x;
+  return r;
+}
+function vano(l, p) { const a = anterior(l, p); return a ? dist([a.lat, a.lon], [p.lat, p.lon]) : null; }
+function longLinea(l) { const o = ordenados(l); let t = 0; for (let i = 1; i < o.length; i++) t += dist([o[i - 1].lat, o[i - 1].lon], [o[i].lat, o[i].lon]); return t; }
+function longRec(l) { const r = l.recorrido; let t = 0; for (let i = 1; i < r.length; i++) t += dist(r[i - 1], r[i]); return t; }
+function alturaTexto(p) {
+  if (p.altura == null) return "";
+  return p.unidadAltura === "ft" ? `${numFmt(p.altura)} ft (${numFmt(p.altura * 0.3048)} m)` : `${numFmt(p.altura)} m`;
+}
+function detalles(p) {
+  const d = [];
+  const add = (k, v) => { if (v != null && String(v).trim()) d.push([k, String(v).trim()]); };
+  const conTipo = (n, t) => t ? `${n} · ${t}` : String(n);
+  add("Tipo de poste", p.tipoPoste);
+  add("Altura", alturaTexto(p));
+  add("Estructura primaria", p.primaria);
+  add("Estructura secundaria", p.secundaria);
+  if (p.retenidas > 0) add("Retenidas", conTipo(p.retenidas, p.tipoRetenida));
+  if (p.lamparas > 0) add("Lámparas", conTipo(p.lamparas, p.tipoLampara));
+  if (p.transformador) add("Transformador", [p.kva && p.kva + " kVA", p.fases].filter(Boolean).join(" · ") || "Sí");
+  if (p.cuchillas > 0) add("Cuchillas / protección", conTipo(p.cuchillas, p.tipoCuchilla));
+  add("Estado", p.estado);
+  add("Observaciones", p.obs);
+  return d;
+}
+function filasExport(l, p) {
+  const f = [["Número", p.numero]];
+  if (l.circuito) f.push(["Circuito", l.circuito]);
+  f.push(["Coordenadas", `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`]);
+  if (p.precision != null) f.push(["Precisión GPS", `±${Math.round(p.precision)} m`]);
+  f.push(["Fecha", fmtFechaHora(p.fecha)]);
+  f.push(...detalles(p));
+  const v = vano(l, p);
+  if (v != null) f.push([`Vano desde ${anterior(l, p).nombre}`, `${v.toFixed(1)} m`]);
+  if (p.fotos.length) f.push(["Fotos", p.fotos.length]);
+  return f.map(([k, v]) => [k, String(v)]);
+}
+
+// ------------------------------------------------------------ Estado de la app
+let lev = null;          // levantamiento abierto
+let map, capaCalles, capaSat, capaPostes, lineaRec, lineaPostes, yo, circPrec;
+let satelite = false, seguir = true, grabando = false, watchId = null, wakeLock = null;
+let actual = null, precision = null, guardarT = null;
+
+function guardar() { clearTimeout(guardarT); guardarT = null; if (lev) return DB.put("levs", lev).catch(e => toast("No se pudo guardar: " + e.message)); }
+function guardarLuego() { clearTimeout(guardarT); guardarT = setTimeout(guardar, 800); }
+
+// ------------------------------------------------------------ Lista de levantamientos
+async function cargarLista() {
+  const levs = (await DB.all("levs")).sort((a, b) => b.creado.localeCompare(a.creado));
+  const cont = $("#lista-levs");
+  if (!levs.length) {
+    cont.innerHTML = `<div class="vacio"><b>Sin levantamientos</b>Crea uno nuevo para empezar a marcar postes en el mapa.</div>`;
+    return;
+  }
+  cont.innerHTML = levs.map(l => `
+    <div class="lev">
+      <button class="abrir" data-abrir="${esc(l.id)}">
+        <div class="txt"><h3>${esc(l.nombre)}</h3>
+        <p>${[l.circuito && "Circuito " + esc(l.circuito), l.postes.length + " postes", fmtDist(longLinea(l)), fmtFecha(l.creado)].filter(Boolean).join(" · ")}</p></div>
+      </button>
+      <button class="icono" data-borrar="${esc(l.id)}" aria-label="Eliminar ${esc(l.nombre)}"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
+    </div>`).join("");
+  $$("[data-abrir]", cont).forEach(b => b.onclick = () => abrirLev(levs.find(l => l.id === b.dataset.abrir)));
+  $$("[data-borrar]", cont).forEach(b => b.onclick = async () => {
+    const l = levs.find(x => x.id === b.dataset.borrar);
+    if (!await confirmar("¿Eliminar levantamiento?", `Se borrarán "${l.nombre}", sus ${l.postes.length} postes y sus fotos. Exporta un respaldo antes si quieres conservarlo.`, "Eliminar", true)) return;
+    for (const f of await DB.fotosDe(l.id)) await DB.del("fotos", f.id);
+    await DB.del("levs", l.id);
+    cargarLista();
+  });
+}
+
+function nuevoLev() {
+  const h = abrirHoja(`
+    <h2>Nuevo levantamiento</h2>
+    <form id="fn" class="pila" novalidate>
+      <label class="campo">Nombre del proyecto<input id="n-nombre" placeholder="Ej. Ampliación aldea El Rosario" autocomplete="off"></label>
+      <label class="campo">Circuito / alimentador<input id="n-circuito" placeholder="Ej. L-342" autocomplete="off"></label>
+      <label class="campo">Prefijo de numeración<input id="n-prefijo" value="P" autocomplete="off"></label>
+      <div class="botones"><button type="button" class="btn sec" id="n-cancelar">Cancelar</button><button type="button" class="btn pri" id="n-crear">Crear</button></div>
+    </form>`);
+  $("#n-nombre", h).focus();
+  $("#n-cancelar", h).onclick = cerrarHoja;
+  const crear = () => {
+    const nombre = $("#n-nombre", h).value.trim();
+    if (!nombre) { $("#n-nombre", h).focus(); toast("Escribe un nombre para el proyecto"); return; }
+    const l = { id: uid(), nombre, circuito: $("#n-circuito", h).value.trim(), prefijo: $("#n-prefijo", h).value.trim() || "P",
+      creado: new Date().toISOString(), postes: [], recorrido: [] };
+    cerrarHoja();
+    abrirLev(l);
+    DB.put("levs", l).catch(e => toast("No se pudo guardar: " + e.message));
+  };
+  $("#n-crear", h).onclick = crear;
+  $("#fn", h).onsubmit = e => { e.preventDefault(); crear(); };
+}
+
+// ------------------------------------------------------------ Mapa
+function iniciarMapa() {
+  if (map) return;
+  map = L.map("mapa", { zoomControl: false, maxZoom: 20, attributionControl: true }).setView(CENTRO, 15);
+  capaCalles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, maxNativeZoom: 19, attribution: "© OpenStreetMap" });
+  capaSat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 20, maxNativeZoom: 19, attribution: "Esri World Imagery" });
+  capaCalles.addTo(map);
+  lineaRec = L.polyline([], { color: cssVar("--track"), weight: 4, opacity: .9 }).addTo(map);
+  lineaPostes = L.polyline([], { color: cssVar("--linea"), weight: 3 }).addTo(map);
+  capaPostes = L.layerGroup().addTo(map);
+  circPrec = L.circle(CENTRO, { radius: 1, color: "#1c7ed6", weight: 1, fillOpacity: .12, interactive: false });
+  yo = L.marker(CENTRO, { icon: L.divIcon({ className: "", html: '<div class="yo"></div>', iconSize: [18, 18] }), interactive: false, keyboard: false });
+  map.on("dragstart", () => { seguir = false; $("#btn-centrar").classList.remove("on"); });
+  map.on("contextmenu", async e => {
+    if (await confirmar("¿Marcar poste aquí?", "Se usará el punto que tocaste en el mapa en lugar de tu ubicación GPS.", "Marcar")) marcar([e.latlng.lat, e.latlng.lng]);
+  });
+}
+
+function dibujar() {
+  const o = ordenados(lev);
+  lineaRec.setLatLngs(lev.recorrido.map(t => [t[0], t[1]]));
+  lineaPostes.setLatLngs(o.map(p => [p.lat, p.lon]));
+  capaPostes.clearLayers();
+  for (const p of o) {
+    const html = `<div class="poste e-${esc(p.estado)}">${p.numero}${p.transformador ? '<span class="tr">⚡</span>' : ""}</div>`;
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "", html, iconSize: [34, 34], iconAnchor: [17, 17] }), title: p.nombre })
+      .on("click", () => verPoste(p)).addTo(capaPostes);
+  }
+  actualizarInfo();
+}
+
+function actualizarInfo() {
+  $("#info-txt").innerHTML = `<b>${lev.postes.length}</b> postes · línea <b class="mono">${fmtDist(longLinea(lev))}</b><br>Recorrido <span class="mono">${fmtDist(longRec(lev))}</span>`;
+  $("#rec").hidden = !grabando;
+}
+
+function actualizarGps() {
+  const g = $("#gps");
+  if (precision == null) { g.textContent = "Sin GPS"; g.className = "gps"; return; }
+  g.textContent = `±${Math.round(precision)} m`;
+  g.className = "gps " + (precision <= 5 ? "ok" : precision <= 15 ? "med" : "mal");
+}
+
+function abrirLev(l) {
+  lev = l;
+  if (!Array.isArray(lev.recorrido)) lev.recorrido = [];
+  $("#m-nombre").textContent = lev.nombre;
+  $("#m-circuito").textContent = lev.circuito ? "Circuito " + lev.circuito : "";
+  $("#v-lista").hidden = true; $("#v-mapa").hidden = false;
+  iniciarMapa();
+  map.invalidateSize();
+  const o = ordenados(lev);
+  if (o.length) map.setView([o.at(-1).lat, o.at(-1).lon], 18);
+  else if (lev.recorrido.length) map.setView(lev.recorrido.at(-1).slice(0, 2), 18);
+  else if (actual) map.setView(actual, 18);
+  seguir = true; $("#btn-centrar").classList.add("on");
+  dibujar();
+  iniciarGps();
+  try { history.pushState({ v: "mapa" }, ""); } catch {}
+}
+
+async function salirMapa() {
+  if (grabando) await alternarGrabacion();
+  detenerGps();
+  await guardar();
+  lev = null;
+  $("#v-mapa").hidden = true; $("#v-lista").hidden = false;
+  cargarLista();
+}
+
+// ------------------------------------------------------------ GPS y recorrido
+function iniciarGps() {
+  if (!("geolocation" in navigator)) { toast("Este navegador no tiene GPS disponible"); return; }
+  if (watchId != null) return;
+  watchId = navigator.geolocation.watchPosition(onPos, err => {
+    if (err.code === 1) toast("Permite el acceso a tu ubicación para marcar postes");
+    else if (err.code === 3) toast("El GPS tarda en responder. Sal a cielo abierto.");
+    else toast("No se pudo leer el GPS");
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+}
+function detenerGps() { if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null; }
+
+function onPos(pos) {
+  const { latitude, longitude, accuracy } = pos.coords;
+  const primera = !actual;
+  actual = [latitude, longitude]; precision = accuracy;
+  if (!lev) return;
+  yo.setLatLng(actual); circPrec.setLatLng(actual).setRadius(accuracy);
+  if (!map.hasLayer(yo)) { circPrec.addTo(map); yo.addTo(map); }
+  if (grabando) agregarAlRecorrido();
+  if (seguir) primera && !lev.postes.length ? map.setView(actual, 18) : map.panTo(actual, { animate: true });
+  actualizarGps();
+}
+
+function agregarAlRecorrido() {
+  if (!actual || precision > 25) return;
+  const r = lev.recorrido, ult = r.at(-1);
+  if (ult && dist(ult, actual) < 3) return;
+  r.push([actual[0], actual[1], Date.now()]);
+  lineaRec.addLatLng(actual);
+  actualizarInfo();
+  guardarLuego();
+}
+
+async function pedirWakeLock() {
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch { wakeLock = null; }
+}
+async function alternarGrabacion() {
+  grabando = !grabando;
+  const b = $("#btn-grabar");
+  b.textContent = grabando ? "■ Detener" : "● Recorrido";
+  b.classList.toggle("grabando", grabando);
+  if (grabando) {
+    await pedirWakeLock();
+    agregarAlRecorrido();
+    toast("Grabando recorrido. Mantén la pantalla encendida.");
+  } else {
+    try { await wakeLock?.release(); } catch {}
+    wakeLock = null;
+    await guardar();
+    toast("Recorrido pausado");
+  }
+  actualizarInfo();
+}
+
+// ------------------------------------------------------------ Postes
+function marcar(en) {
+  const pos = en || actual;
+  if (!pos) { toast("Esperando señal GPS…"); return; }
+  const n = sigNumero(lev), prev = ordenados(lev).at(-1);
+  abrirForm({
+    id: uid(), numero: n, nombre: `${lev.prefijo}-${String(n).padStart(3, "0")}`,
+    lat: pos[0], lon: pos[1], precision: en ? null : precision, fecha: new Date().toISOString(),
+    // tipo y altura se copian del poste anterior para ir más rápido
+    tipoPoste: prev?.tipoPoste || "Concreto", altura: prev?.altura ?? null, unidadAltura: prev?.unidadAltura || "ft",
+    primaria: "", secundaria: "", retenidas: 0, tipoRetenida: "", lamparas: 0, tipoLampara: "",
+    transformador: false, kva: "", fases: "", cuchillas: 0, tipoCuchilla: "", estado: "Bueno", obs: "", fotos: [],
+  }, true);
+}
+
+async function verPoste(p) {
+  const v = vano(lev, p);
+  const h = abrirHoja(`
+    <div class="cab"><div class="poste e-${esc(p.estado)}">${p.numero}${p.transformador ? '<span class="tr">⚡</span>' : ""}</div>
+      <div class="titulo"><h2>${esc(p.nombre)}</h2></div></div>
+    <p class="mono" style="font-size:.85rem">${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}${p.precision != null ? ` · ±${Math.round(p.precision)} m` : " · marcado en el mapa"}</p>
+    ${v != null ? `<p class="nota">Vano desde ${esc(anterior(lev, p).nombre)}: <span class="mono">${v.toFixed(1)} m</span></p>` : ""}
+    <dl class="det">${detalles(p).map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>
+    ${p.fotos.length ? `<div class="miniaturas">${p.fotos.map(id => `<img data-foto="${esc(id)}" alt="Foto del poste">`).join("")}</div>` : ""}
+    <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn pri" id="d-editar">Editar</button></div>`);
+  $("#d-editar", h).onclick = () => { cerrarHoja(); abrirForm(p, false); };
+  $("#d-borrar", h).onclick = async () => {
+    cerrarHoja();
+    if (!await confirmar(`¿Eliminar ${p.nombre}?`, "Se borrarán también sus fotos.", "Eliminar", true)) return;
+    for (const f of p.fotos) await DB.del("fotos", f);
+    lev.postes = lev.postes.filter(x => x.id !== p.id);
+    await guardar(); dibujar();
+  };
+  cargarMiniaturas(h);
+}
+
+function listaPostes() {
+  const o = ordenados(lev);
+  if (!o.length) { toast("Todavía no hay postes marcados"); return; }
+  const h = abrirHoja(`<h2>Postes (${o.length})</h2><p>Línea total ${fmtDist(longLinea(lev))}</p>` + o.map(p => {
+    const v = vano(lev, p);
+    const info = [p.tipoPoste, p.altura != null && `${numFmt(p.altura)} ${p.unidadAltura}`, p.primaria, v != null && `vano ${Math.round(v)} m`, p.fotos.length && `${p.fotos.length} fotos`].filter(Boolean).join(" · ");
+    return `<button class="fila-p" data-id="${esc(p.id)}"><div class="poste e-${esc(p.estado)}">${p.numero}</div><div class="txt"><b>${esc(p.nombre)}</b><small>${esc(info)}</small></div></button>`;
+  }).join(""));
+  $$("[data-id]", h).forEach(b => b.onclick = () => {
+    const p = lev.postes.find(x => x.id === b.dataset.id);
+    cerrarHoja();
+    seguir = false; $("#btn-centrar").classList.remove("on");
+    map.setView([p.lat, p.lon], 19);
+    verPoste(p);
+  });
+}
+
+// ------------------------------------------------------------ Fotos
+const urlFotos = new Map();
+async function urlFoto(id) {
+  if (urlFotos.has(id)) return urlFotos.get(id);
+  const rec = await DB.get("fotos", id);
+  if (!rec) return "";
+  const u = URL.createObjectURL(rec.blob); urlFotos.set(id, u); return u;
+}
+function cargarMiniaturas(root) {
+  $$("img[data-foto]", root).forEach(async img => {
+    img.src = await urlFoto(img.dataset.foto);
+    img.onclick = () => verFoto(img.src);
+  });
+}
+function verFoto(src) {
+  const v = document.createElement("div");
+  v.className = "visor";
+  v.innerHTML = `<img alt="Foto del poste"><button aria-label="Cerrar">✕</button>`;
+  $("img", v).src = src;
+  v.onclick = () => v.remove();
+  document.body.appendChild(v);
+}
+function reducirFoto(file, max = 1600, q = 0.75) {
+  return new Promise(res => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
+      const c = document.createElement("canvas");
+      c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => res(b || file), "image/jpeg", q);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); res(file); };
+    img.src = url;
+  });
+}
+
+// ------------------------------------------------------------ Formulario del poste
+let fPoste = null, fNuevo = false, fs = {}, fFotos = [], fFotosNuevas = [];
+const IN = id => $("#f-" + id);
+
+function abrirForm(p, nuevo) {
+  fPoste = p; fNuevo = nuevo;
+  fs = { tipoPoste: p.tipoPoste, unidadAltura: p.unidadAltura, estado: p.estado, fases: p.fases,
+    retenidas: p.retenidas, lamparas: p.lamparas, cuchillas: p.cuchillas };
+  fFotos = [...p.fotos]; fFotosNuevas = [];
+  $("#f-titulo").textContent = nuevo ? "Nuevo poste" : "Editar poste";
+  $("#f-coords").textContent = `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}` + (p.precision != null ? `  ±${Math.round(p.precision)} m` : "  (mapa)");
+  const v = vano(lev, p);
+  IN("vano").textContent = v != null ? `Vano desde ${anterior(lev, p).nombre}: ${v.toFixed(1)} m` : "Primer poste de la línea";
+  IN("nombre").value = p.nombre;
+  IN("altura").value = p.altura != null ? numFmt(p.altura) : "";
+  IN("primaria").value = p.primaria; IN("secundaria").value = p.secundaria;
+  IN("tipoRetenida").value = p.tipoRetenida; IN("tipoLampara").value = p.tipoLampara;
+  IN("kva").value = p.kva; IN("tipoCuchilla").value = p.tipoCuchilla; IN("obs").value = p.obs;
+  IN("trafo").checked = p.transformador;
+  renderForm();
+  $("#p-form").hidden = false;
+  $("#form").scrollTop = 0;
+}
+
+function renderForm() {
+  $$("#form [data-opc]").forEach(c => {
+    const campo = c.dataset.campo;
+    c.innerHTML = OPC[c.dataset.opc].map(o => {
+      const on = fs[campo] === o;
+      const estilo = campo === "estado" && on ? ` style="background:${COLOR_ESTADO[o]}"` : "";
+      return `<button type="button" data-valor="${esc(o)}" aria-pressed="${on}"${estilo}>${esc(o)}</button>`;
+    }).join("");
+  });
+  IN("alturas").innerHTML = ALTURAS[fs.unidadAltura].map(a => `<button type="button" data-altura="${a}">${a} ${fs.unidadAltura}</button>`).join("");
+  $$("#form .contador").forEach(c => { $("output", c).textContent = fs[c.dataset.campo]; $('[data-d="-1"]', c).disabled = fs[c.dataset.campo] <= 0; });
+  $$("#form [data-si]").forEach(el => {
+    const k = el.dataset.si;
+    el.hidden = k === "transformador" ? !IN("trafo").checked : !(fs[k] > 0);
+  });
+  renderFotosForm();
+}
+
+function renderFotosForm() {
+  IN("fotos").innerHTML = fFotos.map(id => `<div class="f"><img data-foto="${esc(id)}" alt="Foto del poste"><button type="button" class="x" data-quitar="${esc(id)}" aria-label="Quitar foto">✕</button></div>`).join("");
+  cargarMiniaturas(IN("fotos"));
+}
+
+async function agregarFotos(files) {
+  for (const file of files) {
+    try {
+      const blob = await reducirFoto(file);
+      const id = uid();
+      await DB.put("fotos", { id, levId: lev.id, blob });
+      fFotos.push(id); fFotosNuevas.push(id);
+    } catch (e) { toast("No se pudo guardar la foto: " + e.message); }
+  }
+  renderFotosForm();
+}
+
+async function cancelarForm() {
+  for (const id of fFotosNuevas) await DB.del("fotos", id);
+  $("#p-form").hidden = true; fPoste = null;
+}
+
+async function guardarForm(e) {
+  e?.preventDefault();
+  const nombre = IN("nombre").value.trim();
+  if (!nombre) { IN("nombre").focus(); toast("Escribe el nombre del poste"); return; }
+  const altTxt = IN("altura").value.trim().replace(",", ".");
+  const altura = altTxt ? Number(altTxt) : null;
+  if (altTxt && !Number.isFinite(altura)) { IN("altura").focus(); toast("La altura debe ser un número"); return; }
+  const p = fPoste;
+  const quitadas = p.fotos.filter(id => !fFotos.includes(id));
+  const trafo = IN("trafo").checked;
+  Object.assign(p, {
+    nombre, altura, tipoPoste: fs.tipoPoste, unidadAltura: fs.unidadAltura,
+    primaria: IN("primaria").value.trim(), secundaria: IN("secundaria").value.trim(),
+    retenidas: fs.retenidas, tipoRetenida: fs.retenidas > 0 ? IN("tipoRetenida").value.trim() : "",
+    lamparas: fs.lamparas, tipoLampara: fs.lamparas > 0 ? IN("tipoLampara").value.trim() : "",
+    transformador: trafo, kva: trafo ? IN("kva").value.trim() : "", fases: trafo ? (fs.fases || "") : "",
+    cuchillas: fs.cuchillas, tipoCuchilla: fs.cuchillas > 0 ? IN("tipoCuchilla").value.trim() : "",
+    estado: fs.estado, obs: IN("obs").value.trim(), fotos: [...fFotos],
+  });
+  if (fNuevo) lev.postes.push(p);
+  // La pantalla se actualiza de inmediato; el guardado sigue en segundo plano.
+  $("#p-form").hidden = true; fPoste = null;
+  dibujar();
+  toast(`${p.nombre} guardado`);
+  for (const id of quitadas) DB.del("fotos", id).catch(() => {});
+  guardar();
+}
+
+// ------------------------------------------------------------ Exportar
+const escX = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+function gpx(l) {
+  const out = ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<gpx version="1.1" creator="Levantamiento MT" xmlns="http://www.topografix.com/GPX/1/1">',
+    `<metadata><name>${escX(l.nombre)}</name><time>${new Date(l.creado).toISOString()}</time></metadata>`];
+  for (const p of ordenados(l)) {
+    const desc = filasExport(l, p).map(([k, v]) => `${k}: ${v}`).join("\n");
+    out.push(`<wpt lat="${p.lat}" lon="${p.lon}"><time>${new Date(p.fecha).toISOString()}</time><name>${escX(p.nombre)}</name><desc>${escX(desc)}</desc><type>${escX(p.estado)}</type><sym>Flag</sym></wpt>`);
+  }
+  if (l.recorrido.length > 1) {
+    out.push("<trk><name>Recorrido</name><trkseg>");
+    for (const t of l.recorrido) out.push(`<trkpt lat="${t[0]}" lon="${t[1]}">${t[2] ? `<time>${new Date(t[2]).toISOString()}</time>` : ""}</trkpt>`);
+    out.push("</trkseg></trk>");
+  }
+  const o = ordenados(l);
+  if (o.length > 1) {
+    out.push("<trk><name>Línea de postes</name><trkseg>");
+    for (const p of o) out.push(`<trkpt lat="${p.lat}" lon="${p.lon}"></trkpt>`);
+    out.push("</trkseg></trk>");
+  }
+  out.push("</gpx>");
+  return out.join("\n");
+}
+
+// colores KML: aabbggrr
+const KML_COLOR = { Bueno: "ff3e8a2b", Regular: "ff0077e6", Malo: "ff2a2ac9", Reemplazar: "ffe84870" };
+function kml(l, conFotos) {
+  const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2">', "<Document>",
+    `<name>${escX(l.nombre)}</name>`];
+  if (l.circuito) out.push(`<description>Circuito ${escX(l.circuito)}</description>`);
+  for (const [estado, color] of Object.entries(KML_COLOR)) {
+    out.push(`<Style id="e_${estado.toLowerCase()}"><IconStyle><color>${color}</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><scale>0.8</scale></LabelStyle></Style>`);
+  }
+  out.push('<Style id="recorrido"><LineStyle><color>ffc27119</color><width>3</width></LineStyle></Style>');
+  out.push('<Style id="linea"><LineStyle><color>ff0c59e8</color><width>4</width></LineStyle></Style>');
+  out.push("<Folder><name>Postes</name>");
+  for (const p of ordenados(l)) {
+    const filas = filasExport(l, p);
+    let html = "<table>" + filas.map(([k, v]) => `<tr><td><b>${escX(k)}</b></td><td>${escX(v).replace(/\n/g, "<br/>")}</td></tr>`).join("") + "</table>";
+    if (conFotos) html += p.fotos.map(id => `<br/><img src="fotos/${escX(id)}.jpg" width="320"/>`).join("");
+    const estilo = KML_COLOR[p.estado] ? p.estado.toLowerCase() : "bueno";
+    out.push("<Placemark>", `<name>${escX(p.nombre)}</name>`, `<description><![CDATA[${html}]]></description>`, `<styleUrl>#e_${estilo}</styleUrl>`, "<ExtendedData>");
+    for (const [k, v] of filas) out.push(`<Data name="${escX(k)}"><value>${escX(v)}</value></Data>`);
+    out.push("</ExtendedData>", `<Point><coordinates>${p.lon},${p.lat},0</coordinates></Point>`, "</Placemark>");
+  }
+  out.push("</Folder>");
+  const o = ordenados(l);
+  if (o.length > 1) {
+    out.push("<Folder><name>Línea</name><Placemark>", `<name>Línea de postes (${Math.round(longLinea(l))} m)</name>`,
+      '<styleUrl>#linea</styleUrl><LineString><tessellate>1</tessellate><coordinates>', o.map(p => `${p.lon},${p.lat},0`).join(" "),
+      "</coordinates></LineString></Placemark></Folder>");
+  }
+  if (l.recorrido.length > 1) {
+    out.push("<Folder><name>Recorrido</name><Placemark>", `<name>Recorrido (${Math.round(longRec(l))} m)</name>`,
+      '<styleUrl>#recorrido</styleUrl><LineString><tessellate>1</tessellate><coordinates>', l.recorrido.map(t => `${t[1]},${t[0]},0`).join(" "),
+      "</coordinates></LineString></Placemark></Folder>");
+  }
+  out.push("</Document>", "</kml>");
+  return out.join("\n");
+}
+
+async function kmz(l) {
+  const zip = new JSZip();
+  zip.file("doc.kml", kml(l, true));
+  for (const p of l.postes) for (const id of p.fotos) {
+    const rec = await DB.get("fotos", id);
+    if (rec) zip.file(`fotos/${id}.jpg`, rec.blob);
+  }
+  return zip.generateAsync({ type: "blob", mimeType: "application/vnd.google-earth.kmz" });
+}
+
+function blobADataURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
+async function respaldo(l) {
+  const fotos = {};
+  for (const p of l.postes) for (const id of p.fotos) { const rec = await DB.get("fotos", id); if (rec) fotos[id] = await blobADataURL(rec.blob); }
+  return JSON.stringify({ app: "levantamiento-mt", version: 1, lev: l, fotos });
+}
+
+function nombreArchivo(l, ext) {
+  const d = new Date();
+  const base = l.nombre.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "levantamiento";
+  return `${base}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.${ext}`;
+}
+
+async function entregar(blob, nombre, compartir) {
+  if (compartir) {
+    const file = new File([blob], nombre, { type: blob.type || "application/octet-stream" });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre }); return; }
+      toast("Este teléfono no permite compartir este tipo de archivo; se descargará.");
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = nombre;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+  toast("Descargado en tu carpeta de Descargas: " + nombre);
+}
+
+function menuExportar() {
+  if (!lev.postes.length && !lev.recorrido.length) { toast("Todavía no hay datos para exportar"); return; }
+  const h = abrirHoja(`
+    <h2>Exportar</h2><p>${lev.postes.length} postes · ${fmtDist(longLinea(lev))} de línea</p>
+    <div class="opciones">
+      <button data-f="kmz"><b>KMZ con fotos</b><span>Google Earth, con las fotos dentro de cada poste</span></button>
+      <button data-f="kml"><b>KML</b><span>Google Earth, QGIS, AutoCAD Map, Global Mapper</span></button>
+      <button data-f="gpx"><b>GPX</b><span>GPS de mano, apps de navegación</span></button>
+      <button data-f="json"><b>Respaldo completo</b><span>Para guardar o pasar a otro teléfono (incluye fotos)</span></button>
+    </div>
+    <label class="switch" style="margin-top:12px"><input type="checkbox" id="x-compartir" checked> Compartir (WhatsApp, correo, Drive) en lugar de descargar</label>`);
+  $$("[data-f]", h).forEach(b => b.onclick = async () => {
+    const f = b.dataset.f, compartir = $("#x-compartir", h).checked;
+    cerrarHoja();
+    toast("Preparando archivo…");
+    try {
+      await guardar();
+      let blob;
+      if (f === "gpx") blob = new Blob([gpx(lev)], { type: "application/gpx+xml" });
+      else if (f === "kml") blob = new Blob([kml(lev, false)], { type: "application/vnd.google-earth.kml+xml" });
+      else if (f === "kmz") blob = await kmz(lev);
+      else blob = new Blob([await respaldo(lev)], { type: "application/json" });
+      await entregar(blob, nombreArchivo(lev, f === "json" ? "json" : f), compartir);
+    } catch (e) { toast("No se pudo exportar: " + e.message); }
+  });
+}
+
+async function importarRespaldo(file) {
+  try {
+    const d = JSON.parse(await file.text());
+    if (d.app !== "levantamiento-mt" || !d.lev?.id) throw new Error("no es un respaldo de esta app");
+    const existe = await DB.get("levs", d.lev.id);
+    if (existe && !await confirmar("Ya existe este levantamiento", `"${existe.nombre}" se reemplazará con el respaldo.`, "Reemplazar", true)) return;
+    for (const [id, dataUrl] of Object.entries(d.fotos || {})) {
+      const blob = await (await fetch(dataUrl)).blob();
+      await DB.put("fotos", { id, levId: d.lev.id, blob });
+    }
+    await DB.put("levs", d.lev);
+    toast(`Importado: ${d.lev.nombre}`);
+    cargarLista();
+  } catch (e) { toast("No se pudo importar: " + e.message); }
+}
+
+// ------------------------------------------------------------ Hoja inferior y confirmaciones
+let hojaAlCerrar = null;
+function abrirHoja(html) {
+  const h = $("#hoja");
+  h.innerHTML = '<div class="asa"></div>' + html;
+  h.hidden = false; $("#velo").hidden = false; h.scrollTop = 0;
+  return h;
+}
+function cerrarHoja() {
+  const cb = hojaAlCerrar; hojaAlCerrar = null;
+  $("#hoja").hidden = true; $("#velo").hidden = true; $("#hoja").innerHTML = "";
+  if (cb) cb();
+}
+function confirmar(titulo, texto, ok = "Aceptar", peligro = false) {
+  return new Promise(res => {
+    const h = abrirHoja(`<h2>${esc(titulo)}</h2><p>${esc(texto)}</p>
+      <div class="botones"><button class="btn sec" data-r="0">Cancelar</button><button class="btn ${peligro ? "peligro" : "pri"}" data-r="1">${esc(ok)}</button></div>`);
+    hojaAlCerrar = () => res(false);
+    $$("[data-r]", h).forEach(b => b.onclick = () => { hojaAlCerrar = null; cerrarHoja(); res(b.dataset.r === "1"); });
+  });
+}
+
+// ------------------------------------------------------------ Eventos
+function enlazar() {
+  for (const [id, k] of [["primaria", "primaria"], ["secundaria", "secundaria"], ["retenida", "retenida"], ["lampara", "lampara"], ["cuchilla", "cuchilla"], ["kva", "kva"]]) {
+    $("#dl-" + id).innerHTML = OPC[k].map(o => `<option value="${esc(o)}"></option>`).join("");
+  }
+  $("#btn-nuevo").onclick = nuevoLev;
+  $("#btn-importar").onclick = () => $("#in-importar").click();
+  $("#in-importar").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importarRespaldo(f); };
+  $("#btn-volver").onclick = () => salirMapa();
+  $("#btn-marcar").onclick = () => marcar();
+  $("#btn-grabar").onclick = alternarGrabacion;
+  $("#btn-lista-postes").onclick = listaPostes;
+  $("#btn-exportar").onclick = menuExportar;
+  $("#btn-capa").onclick = () => {
+    satelite = !satelite;
+    map.removeLayer(satelite ? capaCalles : capaSat); (satelite ? capaSat : capaCalles).addTo(map);
+    const b = $("#btn-capa"); b.textContent = satelite ? "MAPA" : "SAT";
+    b.setAttribute("aria-label", satelite ? "Cambiar a mapa de calles" : "Cambiar a vista satelital");
+  };
+  $("#btn-centrar").onclick = () => {
+    if (!actual) { toast("Esperando señal GPS…"); return; }
+    seguir = true; $("#btn-centrar").classList.add("on");
+    map.setView(actual, Math.max(map.getZoom(), 17));
+  };
+  $("#velo").onclick = cerrarHoja;
+
+  // formulario
+  const form = $("#form");
+  form.onsubmit = guardarForm;
+  $("#f-guardar").onclick = () => guardarForm();
+  $("#f-cancelar").onclick = cancelarForm;
+  form.addEventListener("click", e => {
+    const chip = e.target.closest("[data-valor]");
+    if (chip) { const c = chip.closest("[data-campo]"); fs[c.dataset.campo] = chip.dataset.valor; renderForm(); return; }
+    const alt = e.target.closest("[data-altura]");
+    if (alt) { IN("altura").value = alt.dataset.altura; return; }
+    const d = e.target.closest("[data-d]");
+    if (d) { const c = d.closest(".contador"); fs[c.dataset.campo] = Math.max(0, fs[c.dataset.campo] + Number(d.dataset.d)); renderForm(); return; }
+    const q = e.target.closest("[data-quitar]");
+    if (q) { fFotos = fFotos.filter(id => id !== q.dataset.quitar); renderFotosForm(); }
+  });
+  IN("trafo").onchange = renderForm;
+  $("#f-btn-cam").onclick = () => IN("cam").click();
+  $("#f-btn-gal").onclick = () => IN("gal").click();
+  for (const id of ["cam", "gal"]) IN(id).onchange = e => { const fl = [...e.target.files]; e.target.value = ""; agregarFotos(fl); };
+
+  // botón "atrás" de Android
+  window.addEventListener("popstate", () => {
+    if (!$("#p-form").hidden) { cancelarForm(); try { history.pushState({ v: "mapa" }, ""); } catch {} return; }
+    if (!$("#hoja").hidden) { cerrarHoja(); try { history.pushState({ v: "mapa" }, ""); } catch {} return; }
+    if (lev) salirMapa();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") guardar();
+    else if (grabando) pedirWakeLock();
+  });
+  window.addEventListener("pagehide", () => guardar());
+}
+
+// Muestra en pantalla cualquier error inesperado (útil para reportarlo)
+window.addEventListener("error", e => toast("Error: " + (e.message || "desconocido")));
+window.addEventListener("unhandledrejection", e => toast("Error: " + (e.reason?.message || e.reason || "desconocido")));
+
+(async function inicio() {
+  if (!window.L) { document.body.innerHTML = '<p style="padding:24px">Se necesita internet la primera vez para cargar el mapa. Revisa tu conexión y recarga.</p>'; return; }
+  enlazar();
+  try { await navigator.storage?.persist?.(); } catch {}
+  try { await cargarLista(); }
+  catch (e) { $("#lista-levs").innerHTML = `<div class="vacio"><b>No se pudo abrir el almacenamiento</b>${esc(e.message)}. Abre la app en Chrome normal (no en modo incógnito).</div>`; }
+})();
+</script>
+</body>
+</html>
