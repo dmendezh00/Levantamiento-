@@ -298,6 +298,24 @@ function dist(a, b) {
 }
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
+// ------------------------------------------------------------ Modo aplicación (APK)
+// Dentro de la APK, Capacitor da acceso al menú de compartir de Android:
+// cualquier archivo (KMZ, KML, GPX, ZIP) va directo a WhatsApp, Drive, correo, etc.
+const NATIVO = !!window.Capacitor?.isNativePlatform?.();
+const plugin = n => window.Capacitor?.Plugins?.[n] || window.Capacitor?.registerPlugin?.(n);
+async function compartirNativo({ archivos = [], texto = "", titulo = "" }) {
+  const Filesystem = plugin("Filesystem"), Share = plugin("Share");
+  const uris = [];
+  for (const f of archivos) {
+    const data = (await blobADataURL(f)).split(",")[1];
+    const r = await Filesystem.writeFile({ path: "compartir/" + f.name, data, directory: "CACHE", recursive: true });
+    uris.push(r.uri);
+  }
+  try {
+    await Share.share({ title: titulo || undefined, text: texto || undefined, files: uris.length ? uris : undefined, dialogTitle: "Compartir" });
+  } catch (e) { if (!/cancel/i.test(e?.message || "")) throw e; }
+}
+
 let toastT;
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
@@ -569,6 +587,7 @@ function agregarAlRecorrido() {
 }
 
 async function pedirWakeLock() {
+  if (NATIVO) { try { await plugin("KeepAwake")?.keepAwake(); } catch {} return; }
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch { wakeLock = null; }
 }
 async function alternarGrabacion() {
@@ -582,6 +601,7 @@ async function alternarGrabacion() {
     toast("Grabando recorrido. Mantén la pantalla encendida.");
   } else {
     try { await wakeLock?.release(); } catch {}
+    if (NATIVO) { try { await plugin("KeepAwake")?.allowSleep(); } catch {} }
     wakeLock = null;
     await guardar();
     toast("Recorrido pausado");
@@ -927,6 +947,7 @@ async function generarArchivo(f) {
 }
 
 async function compartirWhatsApp(texto, archivos = []) {
+  if (NATIVO) return compartirNativo({ archivos, texto });
   if (archivos.length && navigator.canShare?.({ files: archivos })) {
     try { await navigator.share({ files: archivos, text: texto }); return; }
     catch (e) { if (e.name === "AbortError") return; }
@@ -952,6 +973,10 @@ function nombreArchivo(l, ext) {
 }
 
 async function entregar(blob, nombre, compartir) {
+  if (NATIVO) {
+    await compartirNativo({ archivos: [new File([blob], nombre, { type: blob.type || "application/octet-stream" })], titulo: nombre });
+    return;
+  }
   let compartido = false;
   if (compartir) {
     const file = new File([blob], nombre, { type: blob.type || "application/octet-stream" });
@@ -990,7 +1015,7 @@ function menuExportar() {
       <button data-w="resumen"><b>Enviar resumen</b><span>Lista de postes con datos y ubicación en Google Maps</span></button>
       <button data-w="fotos"><b>Enviar fotos</b><span>Todas las fotos, con el nombre del poste en cada archivo</span></button>
     </div>
-    <label class="switch" style="margin-top:12px"><input type="checkbox" id="x-compartir"> Al exportar, abrir el menú de compartir en lugar de solo descargar</label>`);
+    <label class="switch" style="margin-top:12px"${NATIVO ? " hidden" : ""}><input type="checkbox" id="x-compartir"> Al exportar, abrir el menú de compartir en lugar de solo descargar</label>`);
   $$("[data-f]", h).forEach(b => b.onclick = async () => {
     const f = b.dataset.f, compartir = $("#x-compartir", h).checked;
     cerrarHoja();
@@ -1016,7 +1041,7 @@ function menuExportar() {
       toast("Preparando fotos…");
       const archivos = await archivosFoto(ordenados(lev));
       if (!archivos.length) { toast("Todavía no hay fotos en este levantamiento"); return; }
-      if (!navigator.canShare?.({ files: archivos })) { toast("Este navegador no deja compartir fotos directo; usa Carpeta de fotos (.zip)"); return; }
+      if (!NATIVO && !navigator.canShare?.({ files: archivos })) { toast("Este navegador no deja compartir fotos directo; usa Carpeta de fotos (.zip)"); return; }
       await compartirWhatsApp(`Fotos · ${lev.nombre}`, archivos);
     } catch (e) { toast("No se pudo compartir: " + e.message); }
   });

@@ -1,0 +1,80 @@
+name: Construir APK
+
+# Cada cambio en la app (index.html) genera una APK nueva en "Releases".
+on:
+  push:
+    branches: [main]
+    paths: ['index.html', 'apk/**', '.github/workflows/apk.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apk
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+
+      - name: Copiar la app
+        run: mkdir -p www && cp ../index.html www/index.html
+
+      - name: Crear proyecto Android
+        run: npx cap add android
+
+      - name: Permisos y versión
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.location.gps" android:required="false" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>#' $M
+          G=android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"1.${{ github.run_number }}\"/" $G
+          grep -E "versionCode|versionName" $G
+          cat $M
+
+      - name: Ícono y pantalla de inicio
+        continue-on-error: true
+        run: npx capacitor-assets generate --android
+
+      - name: Sincronizar
+        run: npx cap sync android
+
+      - name: Llave de firma fija (para poder actualizar sin desinstalar)
+        run: mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore
+
+      - name: Compilar APK
+        working-directory: apk/android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Nombrar APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk ../Levantamiento-MT.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Levantamiento-MT-apk
+          path: Levantamiento-MT.apk
+
+      - name: Publicar descarga
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-v${{ github.run_number }}
+          name: Levantamiento MT 1.${{ github.run_number }}
+          make_latest: true
+          body: |
+            Descarga **Levantamiento-MT.apk** desde el celular e instálala.
+            Si ya tienes una versión anterior, se actualiza sin perder tus levantamientos.
+          files: Levantamiento-MT.apk

@@ -1,0 +1,9 @@
+{
+  "appId": "com.dmendezh.levantamientomt",
+  "appName": "Levantamiento MT",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "levantamiento-mt.app"
+  }
+}
