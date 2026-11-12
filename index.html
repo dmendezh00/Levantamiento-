@@ -120,8 +120,8 @@ button{cursor:pointer}
 .fila-p{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left}
 .fila-p .txt{flex:1;min-width:0}.fila-p small{color:var(--muted);display:block}
 .campo{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
-.campo input,.campo textarea{font-size:1rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:48px;width:100%}
-.campo input:focus,.campo textarea:focus{border-color:var(--accent);outline:none}
+.campo input,.campo textarea,.campo select{font-size:1rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:48px;width:100%}
+.campo input:focus,.campo textarea:focus,.campo select:focus{border-color:var(--accent);outline:none}
 .pila{display:flex;flex-direction:column;gap:12px}
 
 /* Formulario del poste */
@@ -215,13 +215,13 @@ button{cursor:pointer}
     </fieldset>
 
     <fieldset class="sec"><legend>Estructuras</legend>
-      <label class="campo">Estructura primaria<input id="f-primaria" list="dl-primaria" autocomplete="off"></label>
-      <label class="campo">Estructura secundaria<input id="f-secundaria" list="dl-secundaria" autocomplete="off"></label>
+      <label class="campo">Estructura primaria (ENEE)<select id="f-primaria" data-est="primaria"></select></label>
+      <label class="campo">Estructura secundaria / neutro (ENEE)<select id="f-secundaria" data-est="secundaria"></select></label>
     </fieldset>
 
     <fieldset class="sec"><legend>Retenidas</legend>
       <div class="contador" data-campo="retenidas"><span>Cantidad</span><button type="button" data-d="-1" aria-label="Menos">−</button><output>0</output><button type="button" data-d="1" aria-label="Más">+</button></div>
-      <label class="campo" data-si="retenidas">Tipo de retenida<input id="f-tipoRetenida" list="dl-retenida" autocomplete="off"></label>
+      <label class="campo" data-si="retenidas">Tipo de retenida (ENEE)<select id="f-tipoRetenida" data-est="retenida"></select></label>
     </fieldset>
 
     <fieldset class="sec"><legend>Alumbrado</legend>
@@ -261,7 +261,6 @@ button{cursor:pointer}
   <footer class="pie"><button type="button" id="f-guardar" class="btn pri ancho">Guardar poste</button></footer>
 </section>
 
-<datalist id="dl-primaria"></datalist><datalist id="dl-secundaria"></datalist><datalist id="dl-retenida"></datalist>
 <datalist id="dl-lampara"></datalist><datalist id="dl-cuchilla"></datalist><datalist id="dl-kva"></datalist>
 
 <div id="velo" hidden></div>
@@ -279,13 +278,23 @@ const OPC = {
   unidad: ["m", "ft"],
   estado: ["Bueno", "Regular", "Malo", "Reemplazar"],
   fases: ["1F", "2F", "3F (banco)"],
-  primaria: ["Tangente sencilla", "Tangente doble", "Ángulo", "Remate (terminal)", "Doble remate", "Derivación", "Cruce / paso aéreo", "Bandera", "Volado", "Neutro corrido"],
-  secundaria: ["Ninguna", "Bastidor 1 vía", "Bastidor 2 vías", "Bastidor 3 vías", "Bastidor 4 vías", "Remate secundario", "Cable tríplex", "Cable cuádruplex"],
-  retenida: ["Sencilla", "Doble", "Poste a poste", "De banqueta (bandera)", "De ancla"],
   lampara: ["LED", "Sodio (HPS)", "Mercurio", "Metal halide"],
   cuchilla: ["Cortacircuito (cut-out)", "Cuchilla seccionadora", "Pararrayos", "Reconectador"],
   kva: ["10", "15", "25", "37.5", "50", "75", "100", "167"],
 };
+// Estructuras del Manual de Estructuras ENEE 2012 (165): primarias A-I, A-II, A-III, DT-III, DTN-III;
+// secundarias y neutro B-I, B-II, B-III; retenidas R, RH, RTH. Se guarda el código (p. ej. "A-III-1").
+const ESTRUCTURAS = {"primaria":[{"t":"Serie A-I · Estructuras Primarias 1 Fase","e":[["A-I-1","Primaria 1F en tangente (0°-5°)"],["A-I-1V","Primaria 1F voladiza en tangente (0°-5°)"],["A-I-2","Primaria 1F en ángulo (5°-30°)"],["A-I-2V","Primaria 1F voladiza en ángulo (5°-30°)"],["A-I-3","Primaria 1F de paso vertical (30°-60°)"],["A-I-4","Primaria 1F en remate"],["A-I-4A","Primaria 1F remate 180° de remate existente 1F"],["A-I-4B","Primaria 1F remate 180° de 2 o 3 fases existente"],["A-I-4C","Primaria 1F remate a 90° de línea de paso"],["A-I-4V","Primaria 1F voladiza en remate"],["A-I-5","Primaria 1F en doble remate (0°-60°)"],["A-I-5V","Primaria 1F voladiza en doble remate (0°-60°)"],["A-I-6","Primaria 1F en doble remate (60°-90°)"],["A-I-7","Primaria 1F en tangente (0°-5°) y derivación"],["A-I-7V","Primaria 1F voladiza en tangente (0°-5°) y derivación"],["A-I-8","Primaria 1F en ángulo (5°-30°) y derivación"],["A-I-8V","Primaria 1F voladiza en ángulo (5°-30°) y derivación"],["A-I-9","Primaria 1F en doble remate (0°-60°) y derivación"],["A-I-9V","Primaria 1F voladiza en doble remate (0°-60°) y derivación"]]},{"t":"Serie A-II · Estructuras Primarias 2 Fases","e":[["A-II-1","Primaria 2F en tangente (0°-5°)"],["A-II-1V","Primaria 2F voladiza en tangente (0°-5°)"],["A-II-2","Primaria 2F en ángulo (5°-30°)"],["A-II-2V","Primaria 2F voladiza en ángulo (5°-30°)"],["A-II-3","Primaria 2F de paso vertical (30°-60°)"],["A-II-4","Primaria 2F en remate"],["A-II-4A","Primaria 2F remate 180° de 2 o 3 fases existente"],["A-II-4D","Primaria 2F remate 90° de remate existente"],["A-II-4E","Primaria 2F remate 90° de línea de paso"],["A-II-4V","Primaria 2F voladiza en remate"],["A-II-5","Primaria 2F en doble remate (0°-60°)"],["A-II-5R","Primaria 2F doble remate (0°-60°) en suspensión"],["A-II-5V","Primaria 2F voladiza en doble remate (0°-60°)"],["A-II-6","Primaria 2F en doble remate (60°-90°)"],["A-II-6A","Primaria 2F doble remate (60°-90°) y derivación 1F"],["A-II-6R","Primaria 2F doble remate (60°-90°) en suspensión"],["A-II-7","Primaria 2F en tangente (0°-5°) y derivación 2F"],["A-II-7A","Primaria 2F en tangente (0°-5°) y derivación 1F"],["A-II-7V","Primaria 2F voladiza en tangente (0°-5°) y derivación 2F"],["A-II-7VA","Primaria 2F voladiza en tangente (0°-5°) y derivación 1F"],["A-II-8","Primaria 2F en ángulo (5°-30°) y derivación 2F"],["A-II-8A","Primaria 2F en ángulo (5°-30°) y derivación 1F"],["A-II-8V","Primaria 2F voladiza en ángulo (5°-30°) y derivación 2F"],["A-II-8VA","Primaria 2F voladiza en ángulo (5°-30°) y derivación 1F"],["A-II-9","Primaria 2F doble remate (0°-60°) y derivación 2F"],["A-II-9A","Primaria 2F doble remate (0°-60°) y derivación 1F"],["A-II-9V","Primaria 2F voladiza doble remate (0°-60°) y derivación 2F"],["A-II-9VA","Primaria 2F voladiza doble remate (0°-60°) y derivación 1F"]]},{"t":"Serie A-III · Estructuras Primarias 3 Fases","e":[["A-III-1","Primaria 3F en tangente (0°-5°)"],["A-III-1N","Primaria 3F en tangente (0°-5°) con neutro en cruceta"],["A-III-1V","Primaria 3F voladiza en tangente (0°-5°)"],["A-III-2","Primaria 3F en ángulo (5°-30°)"],["A-III-2N","Primaria 3F en ángulo (5°-30°) con neutro en cruceta"],["A-III-2V","Primaria 3F voladiza en ángulo (5°-30°)"],["A-III-3","Primaria 3F de paso vertical (30°-60°)"],["A-III-4","Primaria 3F en remate"],["A-III-4N","Primaria 3F en remate con neutro en cruceta"],["A-III-4A","Primaria 3F en remate 180° de remate existente"],["A-III-4D","Primaria 3F en remate 90° de remate existente"],["A-III-4E","Primaria 3F en remate 90° de línea de paso"],["A-III-4V","Primaria 3F voladiza en remate"],["A-III-5","Primaria 3F en doble remate (0°-60°)"],["A-III-5N","Primaria 3F doble remate (0°-60°) con neutro en cruceta"],["A-III-5V","Primaria 3F voladiza en doble remate (0°-60°)"],["A-III-5R","Primaria 3F doble remate (0°-60°) en suspensión"],["A-III-6","Primaria 3F en doble remate (60°-90°)"],["A-III-6A","Primaria 3F doble remate (60°-90°) y derivación 1F"],["A-III-6B","Primaria 3F doble remate (60°-90°) y derivación 2F"],["A-III-6N","Primaria 3F doble remate (60°-90°) con neutro en cruceta"],["A-III-6R","Primaria 3F doble remate (60°-90°) en suspensión"],["A-III-7","Primaria 3F en tangente (0°-5°) y derivación 3F"],["A-III-7A","Primaria 3F en tangente (0°-5°) y derivación 1F"],["A-III-7B","Primaria 3F en tangente (0°-5°) y derivación 2F"],["A-III-7V","Primaria 3F voladiza en tangente (0°-5°) y derivación 3F"],["A-III-7VA","Primaria 3F voladiza en tangente (0°-5°) y derivación 1F"],["A-III-7VB","Primaria 3F voladiza en tangente (0°-5°) y derivación 2F"],["A-III-8","Primaria 3F en ángulo (5°-30°) y derivación 3F"],["A-III-8A","Primaria 3F en ángulo (5°-30°) y derivación 1F"],["A-III-8B","Primaria 3F en ángulo (5°-30°) y derivación 2F"],["A-III-8V","Primaria 3F voladiza en ángulo (5°-30°) y derivación 3F"],["A-III-8VA","Primaria 3F voladiza en ángulo (5°-30°) y derivación 1F"],["A-III-8VB","Primaria 3F voladiza en ángulo (5°-30°) y derivación 2F"],["A-III-9","Primaria 3F en doble remate (0°-60°) y derivación 3F"],["A-III-9A","Primaria 3F doble remate (0°-60°) y derivación 1F"],["A-III-9B","Primaria 3F doble remate (0°-60°) y derivación 2F"],["A-III-9V","Primaria 3F voladiza doble remate (0°-60°) y derivación 3F"],["A-III-9VA","Primaria 3F voladiza doble remate (0°-60°) y derivación 1F"],["A-III-9VB","Primaria 3F voladiza doble remate (0°-60°) y derivación 2F"]]},{"t":"Serie DT-III · Primarias Doble Terna 3 Fases","e":[["DT-III-1","Primaria doble terna 3F en tangente (0°-5°)"],["DT-III-2","Primaria doble terna 3F en ángulo (5°-30°)"],["DT-III-4","Primaria doble terna 3F en remate"],["DT-III-5","Primaria doble terna 3F en doble remate (0°-60°)"],["DT-III-6","Primaria doble terna 3F en doble remate (60°-90°)"]]},{"t":"Serie DTN-III · Primarias Doble Terna 3 Fases con Neutro en Cruceta","e":[["DTN-III-1","Primaria doble terna 3F en tangente (0°-5°) con neutro en cruceta"],["DTN-III-2","Primaria doble terna 3F en ángulo (5°-30°) con neutro en cruceta"],["DTN-III-4","Primaria doble terna 3F en remate con neutro en cruceta"],["DTN-III-5","Primaria doble terna 3F doble remate (0°-60°) con neutro en cruceta"],["DTN-III-6","Primaria doble terna 3F doble remate (60°-90°) con neutro en cruceta"]]}],"secundaria":[{"t":"Serie B-I · Estructuras de Neutro","e":[["B-I-1","Estructura neutro en tangente (0°-30°)"],["B-I-3","Neutro y piloto en tangente (0°-30°) alumbrado público"],["B-I-4","Neutro de remate cable ACSR"],["B-I-4A","Neutro de remate cable acerado"],["B-I-4B","Neutro de remate 180° de remate existente ACSR"],["B-I-4C","Neutro de remate acerado 180° de remate ACSR existente"],["B-I-4D","Neutro de remate 90° de neutro de paso ACSR"],["B-I-4E","Neutro de remate acerado 90° de neutro de paso ACSR"],["B-I-4F","Neutro de remate 90° de neutro de remate existente ACSR"],["B-I-4G","Neutro remate acerado 90° de neutro de remate existente"],["B-I-5","Neutro doble remate cable ACSR (0°-60°)"],["B-I-5A","Neutro doble remate ACSR-cable acerado (0°-60°)"],["B-I-5B","Neutro doble remate cable acerado (0°-60°)"],["B-I-6","Neutro doble remate a 90° (cable ACSR)"],["B-I-6A","Neutro doble remate ACSR-cable acerado a 90°"],["B-I-6B","Neutro doble remate cable acerado a 90°"],["B-I-7","Neutro en tangente (0°-30°) y derivación al frente a 90° (ACSR)"],["B-I-7A","Neutro en tangente (0°-30°) y derivación atrás a 90° (ACSR)"],["B-I-7B","Neutro en tangente (0°-30°) y derivación al frente a 90° (acerado)"],["B-I-7C","Neutro tangente (0°-30°) y derivación atrás a 90° (acerado)"],["B-I-8","Neutro doble en tangente a 90°"]]},{"t":"Serie B-II · Estructuras Secundarias 2 Fases","e":[["B-II-1","Secundaria 2F en tangente (0°-5°)"],["B-II-2","Secundaria 2F en ángulo (5°-60°)"],["B-II-4","Secundaria 2F en remate"],["B-II-4A","Secundaria 2F remate 180° de remate existente"],["B-II-4B","Secundaria 2F remate 90° de remate existente"],["B-II-4C","Secundaria 2F en remate y remate de neutro a 180°"],["B-II-4D","Secundaria 2F en remate y remate de neutro a 90°"],["B-II-4E","Secundaria 2F en remate y remate de neutro acerado a 180°"],["B-II-4F","Secundaria 2F en remate y remate de neutro acerado a 90°"],["B-II-5","Secundaria 2F en doble remate (0°-60°)"],["B-II-6","Secundaria 2F en doble remate (60°-90°)"],["B-II-6A","Secundaria 2F doble remate (60°-90°) y remate de neutro"],["B-II-6B","Secundaria 2F doble remate (60°-90°) y remate de neutro acerado"],["B-II-7","Secundaria 2F de paso y derivación al frente a 90°"],["B-II-7A","Secundaria 2F de paso (0°-30°) y derivación atrás a 90°"],["B-II-8","Secundaria 2F en doble paso a 90°"],["B-II-9","Secundaria 2F en triple remate a 90°"]]},{"t":"Serie B-III · Estructuras Secundarias","e":[["B-III-1","Secundaria 2F + hilo piloto en tangente (0°-5°)"],["B-III-2","Secundaria 2F + hilo piloto en ángulo (5°-60°)"],["B-III-4","Secundaria 2F + hilo piloto en remate"],["B-III-4A","Secundaria 2F+piloto, remate 180° de remate existente"],["B-III-4B","Secundaria 2F+piloto, remate 90° de remate existente"],["B-III-4C","Secundaria 2F+piloto, remate y neutro 180°"],["B-III-4D","Secundaria 2F+piloto, remate y neutro 90°"],["B-III-4E","Secundaria 2F+piloto, remate y neutro acerado 180°"],["B-III-4F","Secundaria 2F+hilo, remate y neutro acerado 90°"],["B-III-5","Secundaria 2F+piloto, doble remate 0°-60°"],["B-III-6","Secundaria 2F+piloto, doble remate 60°-90°"],["B-III-6A","Secundaria 2F+piloto, doble remate 60°-90° y neutro"],["B-III-6B","Secundaria 2F+piloto, doble remate 60°-90° y neutro acerado"],["B-III-7","Secundaria 2F+piloto, paso 0°-30° y derivación frente"],["B-III-7A","Secundaria 2F+piloto, paso 0°-30° y derivación atrás"],["B-III-8","Secundaria 2F+piloto, doble paso a 90°"],["B-III-9","Secundaria 2F+piloto, triple remate a 90°"]]}],"retenida":[{"t":"Retenidas · R, RH, RTH (misma cantidad para ambas tensiones)","e":[["R-1","Retenida sencilla"],["R-2","Retenida doble"],["R-3","Retenida aérea"],["R-3C","Retenida aérea solo cable"],["R-3V","Retenida aérea para estructura voladiza en remate"],["R-4","Retenida de banco"],["R-5","Retenida pie de amigo"],["R-5T","Retenida pie de amigo tubular"],["R-6","Retenida de viento"],["RH-2","Retenida doble en estructura H"],["RH-6","Retenida de viento en estructura H"],["RTH-2","Retenida doble para troncal en estructura H"],["RTH-6","Retenida de viento para troncal en estructura H"]]}]};
+const EST_DESC = Object.fromEntries(Object.values(ESTRUCTURAS).flatMap(gs => gs.flatMap(g => g.e)));
+const conDesc = c => c && EST_DESC[c] ? `${c} · ${EST_DESC[c]}` : (c || "");
+// Llena un <select> de estructuras; si el poste trae un valor viejo que no está en el catálogo, lo conserva.
+function llenarEst(sel, valor) {
+  const gs = ESTRUCTURAS[sel.dataset.est];
+  let h = `<option value="">— Ninguna —</option>`;
+  if (valor && !EST_DESC[valor]) h += `<option value="${esc(valor)}">${esc(valor)} (anterior)</option>`;
+  h += gs.map(g => `<optgroup label="${esc(g.t)}">${g.e.map(([c, d]) => `<option value="${esc(c)}">${esc(c)} · ${esc(d)}</option>`).join("")}</optgroup>`).join("");
+  sel.innerHTML = h; sel.value = valor || "";
+}
 const ALTURAS = { ft: [25, 30, 35, 40, 45, 50], m: [8, 9, 10, 11, 12, 14] };
 const COLOR_ESTADO = { Bueno: "#2b8a3e", Regular: "#e67700", Malo: "#c92a2a", Reemplazar: "#7048e8" };
 const CENTRO = [14.0723, -87.1921]; // Tegucigalpa
@@ -408,9 +417,9 @@ function detalles(p) {
   const conTipo = (n, t) => t ? `${n} · ${t}` : String(n);
   add("Tipo de poste", p.tipoPoste);
   add("Altura", alturaTexto(p));
-  add("Estructura primaria", p.primaria);
-  add("Estructura secundaria", p.secundaria);
-  if (p.retenidas > 0) add("Retenidas", conTipo(p.retenidas, p.tipoRetenida));
+  add("Estructura primaria", conDesc(p.primaria));
+  add("Estructura secundaria", conDesc(p.secundaria));
+  if (p.retenidas > 0) add("Retenidas", conTipo(p.retenidas, conDesc(p.tipoRetenida)));
   if (p.lamparas > 0) add("Lámparas", conTipo(p.lamparas, p.tipoLampara));
   if (p.transformador) add("Transformador", [p.kva && p.kva + " kVA", p.fases].filter(Boolean).join(" · ") || "Sí");
   if (p.cuchillas > 0) add("Cuchillas / protección", conTipo(p.cuchillas, p.tipoCuchilla));
@@ -776,8 +785,8 @@ function abrirForm(p, nuevo) {
   IN("vano").textContent = v != null ? `Vano desde ${anterior(lev, p).nombre}: ${v.toFixed(1)} m` : "Primer poste de la línea";
   IN("nombre").value = p.nombre;
   IN("altura").value = p.altura != null ? numFmt(p.altura) : "";
-  IN("primaria").value = p.primaria; IN("secundaria").value = p.secundaria;
-  IN("tipoRetenida").value = p.tipoRetenida; IN("tipoLampara").value = p.tipoLampara;
+  llenarEst(IN("primaria"), p.primaria); llenarEst(IN("secundaria"), p.secundaria);
+  llenarEst(IN("tipoRetenida"), p.tipoRetenida); IN("tipoLampara").value = p.tipoLampara;
   IN("kva").value = p.kva; IN("tipoCuchilla").value = p.tipoCuchilla; IN("obs").value = p.obs;
   IN("trafo").checked = p.transformador;
   renderForm();
@@ -1144,7 +1153,7 @@ function confirmar(titulo, texto, ok = "Aceptar", peligro = false) {
 
 // ------------------------------------------------------------ Eventos
 function enlazar() {
-  for (const [id, k] of [["primaria", "primaria"], ["secundaria", "secundaria"], ["retenida", "retenida"], ["lampara", "lampara"], ["cuchilla", "cuchilla"], ["kva", "kva"]]) {
+  for (const [id, k] of [["lampara", "lampara"], ["cuchilla", "cuchilla"], ["kva", "kva"]]) {
     $("#dl-" + id).innerHTML = OPC[k].map(o => `<option value="${esc(o)}"></option>`).join("");
   }
   $("#btn-nuevo").onclick = nuevoLev;
