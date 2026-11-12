@@ -89,6 +89,11 @@ button{cursor:pointer}
   padding:10px max(12px,var(--safe-r)) calc(10px + var(--safe-b)) max(12px,var(--safe-l));z-index:500}
 .acciones .btn{flex:1} .acciones .pri{flex:2}
 .acciones .grabando{border-color:var(--bad);color:var(--bad)}
+.mira{position:absolute;left:50%;top:50%;width:0;height:0;z-index:600;pointer-events:none}
+.mira svg{position:absolute;left:-21px;top:-52px;width:42px;height:52px;filter:drop-shadow(0 3px 3px rgba(0,0,0,.45));transition:transform .15s ease-out}
+.mira .base{position:absolute;left:-5px;top:-3px;width:10px;height:6px;border-radius:50%;background:rgba(0,0,0,.35)}
+.mira.moviendo svg{transform:translateY(-10px)}
+@media (prefers-reduced-motion:reduce){.mira svg{transition:none}}
 
 .poste{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);
   display:grid;place-items:center;color:#fff;font:700 12px var(--f-mono);position:relative}
@@ -103,7 +108,7 @@ button{cursor:pointer}
 .asa{width:40px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 12px}
 .hoja h2{font:700 1.4rem/1.15 var(--f-head);margin:0 0 6px;text-wrap:balance}
 .hoja p{margin:0 0 12px;color:var(--muted)}
-.botones{display:flex;gap:10px;margin-top:16px}.botones .btn{flex:1}
+.botones{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.botones .btn{flex:1 1 calc(50% - 5px)}
 .opciones{display:flex;flex-direction:column;gap:8px}
 .opciones button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
 .opciones button b{font-size:1rem} .opciones button span{font-size:.85rem;color:var(--muted)}
@@ -172,15 +177,20 @@ button{cursor:pointer}
     <button id="btn-lista-postes" class="icono" type="button" aria-label="Lista de postes"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1"/></svg></button>
     <button id="btn-exportar" class="icono" type="button" aria-label="Exportar"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg></button>
   </header>
-  <div id="mapa"></div>
+  <div id="mapa"><div id="mira" class="mira" hidden><span class="base"></span><svg viewBox="0 0 42 52" aria-hidden="true"><path d="M21 51C21 51 3 31 3 20a18 18 0 0136 0c0 11-18 31-18 31z" fill="#e8590c" stroke="#fff" stroke-width="3"/><circle cx="21" cy="20" r="7" fill="#fff"/></svg></div></div>
   <div class="info"><span id="rec" class="rec" hidden></span><div id="info-txt"></div><span id="gps" class="gps">Sin GPS</span></div>
   <div class="flotantes">
     <button id="btn-capa" type="button" aria-label="Cambiar a vista satelital">SAT</button>
     <button id="btn-centrar" type="button" aria-label="Centrar en mi ubicación" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
   </div>
-  <div class="acciones">
+  <div class="acciones" id="acciones">
     <button id="btn-grabar" class="btn sec" type="button">● Recorrido</button>
     <button id="btn-marcar" class="btn pri" type="button">Marcar poste</button>
+  </div>
+  <div class="acciones" id="acciones-colocar" hidden>
+    <button id="c-cancelar" class="btn sec" type="button">Cancelar</button>
+    <button id="c-gps" class="btn sec" type="button" aria-label="Llevar la marca a mi ubicación GPS">Mi GPS</button>
+    <button id="c-ok" class="btn pri" type="button">✓ Confirmar</button>
   </div>
 </section>
 
@@ -495,9 +505,11 @@ function iniciarMapa() {
   circPrec = L.circle(CENTRO, { radius: 1, color: "#1c7ed6", weight: 1, fillOpacity: .12, interactive: false });
   yo = L.marker(CENTRO, { icon: L.divIcon({ className: "", html: '<div class="yo"></div>', iconSize: [18, 18] }), interactive: false, keyboard: false });
   map.on("dragstart", () => { seguir = false; $("#btn-centrar").classList.remove("on"); });
-  map.on("contextmenu", async e => {
-    if (await confirmar("¿Marcar poste aquí?", "Se usará el punto que tocaste en el mapa en lugar de tu ubicación GPS.", "Marcar")) marcar([e.latlng.lat, e.latlng.lng]);
-  });
+  // mantener presionado: abre la marca en ese punto para ajustarla y confirmar
+  map.on("contextmenu", e => { if (lev && !colocando) modoColocar([e.latlng.lat, e.latlng.lng], "Nuevo poste", crearPoste); });
+  map.on("move", actualizarColocar);
+  map.on("movestart", () => colocando && $("#mira").classList.add("moviendo"));
+  map.on("moveend", () => $("#mira").classList.remove("moviendo"));
 }
 
 function dibujar() {
@@ -544,6 +556,7 @@ function abrirLev(l) {
 }
 
 async function salirMapa() {
+  if (colocando) salirColocar();
   if (grabando) await alternarGrabacion();
   detenerGps();
   await guardar();
@@ -609,14 +622,52 @@ async function alternarGrabacion() {
   actualizarInfo();
 }
 
+// ------------------------------------------------------------ Escoger el punto en el mapa
+// Se mueve el mapa hasta que la marca quede sobre el poste y luego se confirma.
+let colocando = null;
+function modoColocar(inicio, titulo, alConfirmar) {
+  if (!$("#hoja").hidden) cerrarHoja();
+  colocando = { titulo, alConfirmar };
+  seguir = false; $("#btn-centrar").classList.remove("on");
+  const c = inicio || actual;
+  if (c) map.setView(c, Math.max(map.getZoom(), 18));
+  $("#mira").hidden = false;
+  $("#acciones").hidden = true; $("#acciones-colocar").hidden = false;
+  actualizarColocar();
+}
+function actualizarColocar() {
+  if (!colocando) return;
+  const c = map.getCenter();
+  const d = actual ? dist(actual, [c.lat, c.lng]) : null;
+  const lejos = d == null ? "" : d < 1 ? " · en tu ubicación" : ` · a ${fmtDist(d)} de ti`;
+  $("#info-txt").innerHTML = `<b>${esc(colocando.titulo)}</b>: mueve el mapa hasta poner la marca sobre el poste<br>` +
+    `<span class="mono">${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}</span>${lejos}`;
+}
+function salirColocar() {
+  colocando = null;
+  $("#mira").hidden = true; $("#mira").classList.remove("moviendo");
+  $("#acciones").hidden = false; $("#acciones-colocar").hidden = true;
+  actualizarInfo();
+}
+function confirmarColocar() {
+  if (!colocando) return;
+  const c = map.getCenter(), pos = [c.lat, c.lng];
+  const enGps = !!actual && dist(actual, pos) < 1;
+  const cb = colocando.alConfirmar;
+  salirColocar();
+  cb(pos, enGps);
+}
+
 // ------------------------------------------------------------ Postes
-function marcar(en) {
-  const pos = en || actual;
-  if (!pos) { toast("Esperando señal GPS…"); return; }
+function marcar() {
+  if (!actual) toast("Sin señal GPS: mueve el mapa hasta el poste y confirma");
+  modoColocar(null, "Nuevo poste", crearPoste);
+}
+function crearPoste(pos, enGps) {
   const n = sigNumero(lev), prev = ordenados(lev).at(-1);
   abrirForm({
     id: uid(), numero: n, nombre: `${lev.prefijo}-${String(n).padStart(3, "0")}`,
-    lat: pos[0], lon: pos[1], precision: en ? null : precision, fecha: new Date().toISOString(),
+    lat: pos[0], lon: pos[1], precision: enGps ? precision : null, fecha: new Date().toISOString(),
     // tipo y altura se copian del poste anterior para ir más rápido
     tipoPoste: prev?.tipoPoste || "Concreto", altura: prev?.altura ?? null, unidadAltura: prev?.unidadAltura || "ft",
     primaria: "", secundaria: "", retenidas: 0, tipoRetenida: "", lamparas: 0, tipoLampara: "",
@@ -625,6 +676,7 @@ function marcar(en) {
 }
 
 async function verPoste(p) {
+  if (colocando) return;
   const v = vano(lev, p);
   const h = abrirHoja(`
     <div class="cab"><div class="poste e-${esc(p.estado)}">${p.numero}${p.transformador ? '<span class="tr">⚡</span>' : ""}</div>
@@ -633,7 +685,12 @@ async function verPoste(p) {
     ${v != null ? `<p class="nota">Vano desde ${esc(anterior(lev, p).nombre)}: <span class="mono">${v.toFixed(1)} m</span></p>` : ""}
     <dl class="det">${detalles(p).map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>
     ${p.fotos.length ? `<div class="miniaturas">${p.fotos.map(id => `<img data-foto="${esc(id)}" alt="Foto del poste">`).join("")}</div>` : ""}
-    <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn sec" id="d-wa">WhatsApp</button><button class="btn pri" id="d-editar">Editar</button></div>`);
+    <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn sec" id="d-mover">Mover</button><button class="btn sec" id="d-wa">WhatsApp</button><button class="btn pri" id="d-editar">Editar</button></div>`);
+  $("#d-mover", h).onclick = () => modoColocar([p.lat, p.lon], `Mover ${p.nombre}`, async (pos, enGps) => {
+    p.lat = pos[0]; p.lon = pos[1]; p.precision = enGps ? precision : null;
+    dibujar(); toast(`${p.nombre} movido`);
+    await guardar();
+  });
   $("#d-wa", h).onclick = async () => {
     try { await compartirWhatsApp(textoPoste(lev, p), await archivosFoto([p])); }
     catch (e) { toast("No se pudo compartir: " + e.message); }
@@ -1095,6 +1152,12 @@ function enlazar() {
   $("#in-importar").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importarRespaldo(f); };
   $("#btn-volver").onclick = () => salirMapa();
   $("#btn-marcar").onclick = () => marcar();
+  $("#c-cancelar").onclick = () => salirColocar();
+  $("#c-ok").onclick = confirmarColocar;
+  $("#c-gps").onclick = () => {
+    if (!actual) { toast("Esperando señal GPS…"); return; }
+    map.setView(actual, Math.max(map.getZoom(), 18));
+  };
   $("#btn-grabar").onclick = alternarGrabacion;
   $("#btn-lista-postes").onclick = listaPostes;
   $("#btn-exportar").onclick = menuExportar;
@@ -1134,6 +1197,7 @@ function enlazar() {
   // botón "atrás" de Android
   window.addEventListener("popstate", () => {
     if (!$("#p-form").hidden) { cancelarForm(); try { history.pushState({ v: "mapa" }, ""); } catch {} return; }
+    if (colocando) { salirColocar(); try { history.pushState({ v: "mapa" }, ""); } catch {} return; }
     if (!$("#hoja").hidden) { cerrarHoja(); try { history.pushState({ v: "mapa" }, ""); } catch {} return; }
     if (lev) salirMapa();
   });
