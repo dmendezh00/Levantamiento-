@@ -142,6 +142,11 @@ button{cursor:pointer}
 .chips.rapidas button{min-height:34px;font:500 .85rem var(--f-mono)}
 .fila{display:flex;gap:10px;align-items:flex-end}.crece{flex:1;min-width:0}
 .estr{display:flex;flex-direction:column;gap:8px}
+.sug{display:flex;flex-direction:column;gap:8px;background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:.92rem}
+.sug-nota{color:var(--muted);font-size:.85rem}
+.sug-fila{display:flex;flex-direction:column;gap:6px}
+.sug-fila>span{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.sug .chips button{min-height:36px;font:600 .85rem var(--f-mono);background:var(--surface)}
 .estr-t{font-size:.85rem;color:var(--muted)}
 .estr-lista{display:flex;flex-direction:column;gap:6px}
 .estr-item{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
@@ -217,7 +222,17 @@ button{cursor:pointer}
   <form id="form" class="form" novalidate>
     <fieldset class="sec"><legend>Identificación</legend>
       <label class="campo">Nombre / número del poste<input id="f-nombre" autocomplete="off"></label>
+      <label class="campo">Conectado a (de dónde viene la línea)<select id="f-conexion"></select></label>
       <p id="f-vano" class="nota"></p>
+      <p id="f-utm" class="mono" style="margin:0;font-size:.85rem;color:var(--muted)"></p>
+    </fieldset>
+
+    <fieldset class="sec" id="f-sec-cable"><legend>Cable del vano</legend>
+      <p class="nota" id="f-cable-desde" style="font-weight:500;color:var(--muted)"></p>
+      <div class="chips" data-campo="cableFases" data-opc="cableFases"></div>
+      <label class="campo">Conductor primario (MT)<input id="f-cableMT" list="dl-cableMT" autocomplete="off" placeholder="Ej. ACSR 1/0"></label>
+      <label class="campo">Neutro<input id="f-cableN" list="dl-cableN" autocomplete="off" placeholder="Ej. ACSR #2"></label>
+      <label class="campo">Secundario (BT)<input id="f-cableBT" list="dl-cableBT" autocomplete="off" placeholder="Ej. Tríplex 1/0"></label>
     </fieldset>
 
     <fieldset class="sec"><legend>Poste</legend>
@@ -230,6 +245,7 @@ button{cursor:pointer}
     </fieldset>
 
     <fieldset class="sec"><legend>Estructuras</legend>
+      <div id="f-angulo" class="sug" hidden></div>
       <div class="estr" data-estr="primarias">
         <span class="estr-t">Estructuras primarias (ENEE)</span>
         <div class="estr-lista"></div>
@@ -289,7 +305,7 @@ button{cursor:pointer}
   <footer class="pie"><button type="button" id="f-guardar" class="btn pri ancho">Guardar poste</button></footer>
 </section>
 
-<datalist id="dl-lampara"></datalist><datalist id="dl-cuchilla"></datalist><datalist id="dl-kva"></datalist>
+<datalist id="dl-cableMT"></datalist><datalist id="dl-cableN"></datalist><datalist id="dl-cableBT"></datalist><datalist id="dl-lampara"></datalist><datalist id="dl-cuchilla"></datalist><datalist id="dl-kva"></datalist>
 
 <div id="velo" hidden></div>
 <section id="hoja" class="hoja" hidden></section>
@@ -303,6 +319,10 @@ button{cursor:pointer}
 // ------------------------------------------------------------ Opciones
 // Edita estas listas con los nombres que usa tu empresa.
 const OPC = {
+  cableFases: ["1F", "2F", "3F"],
+  cableMT: ["ACSR #2", "ACSR 1/0", "ACSR 2/0", "ACSR 3/0", "ACSR 4/0", "ACSR 266.8 MCM", "ACSR 336.4 MCM", "ACSR 477 MCM", "AAAC 1/0", "AAAC 2/0", "AAAC 4/0", "Cobre #2", "Cobre 1/0"],
+  cableN: ["ACSR #2", "ACSR 1/0", "ACSR 2/0", "ACSR 3/0", "ACSR 4/0", "Acerado 5/16\"", "Acerado 3/8\""],
+  cableBT: ["Tríplex #2", "Tríplex 1/0", "Tríplex 2/0", "Tríplex 4/0", "Cuádruplex 1/0", "Cuádruplex 2/0", "Cuádruplex 4/0", "WP #6 (piloto)", "WP #4", "ACSR #2"],
   tipoPoste: ["Concreto", "Madera", "Metal", "Fibra de vidrio"],
   unidad: ["m", "ft"],
   estado: ["Bueno", "Regular", "Malo", "Reemplazar"],
@@ -433,8 +453,114 @@ function anterior(l, p) {
   for (const x of l.postes) if (x.id !== p.id && x.numero < p.numero && (!r || x.numero > r.numero)) r = x;
   return r;
 }
-function vano(l, p) { const a = anterior(l, p); return a ? dist([a.lat, a.lon], [p.lat, p.lon]) : null; }
-function longLinea(l) { const o = ordenados(l); let t = 0; for (let i = 1; i < o.length; i++) t += dist([o[i - 1].lat, o[i - 1].lon], [o[i].lat, o[i].lon]); return t; }
+// ---- Conexiones (ramales): cada poste guarda a qué poste se conecta (conectadoA = id del poste,
+// o null si ahí inicia la línea). Los postes antiguos sin ese dato se conectan al de número anterior.
+function padre(l, p) {
+  if (p.conectadoA === undefined) return anterior(l, p);
+  return p.conectadoA ? l.postes.find(x => x.id === p.conectadoA) || null : null;
+}
+const hijos = (l, p) => l.postes.filter(x => x.id !== p.id && padre(l, x)?.id === p.id);
+function vano(l, p) { const a = padre(l, p); return a ? dist([a.lat, a.lon], [p.lat, p.lon]) : null; }
+function longLinea(l) { let t = 0; for (const p of l.postes) t += vano(l, p) || 0; return t; }
+const vanos = l => ordenados(l).map(p => [padre(l, p), p]).filter(([a]) => a);
+// Poste y todos los que cuelgan de él (para no permitir conexiones en círculo)
+function descendientes(l, p) {
+  const s = new Set([p.id]);
+  for (let cambio = true; cambio;) {
+    cambio = false;
+    for (const x of l.postes) { const a = padre(l, x); if (a && s.has(a.id) && !s.has(x.id)) { s.add(x.id); cambio = true; } }
+  }
+  return s;
+}
+// Tramos continuos para dibujar: cada derivación empieza un tramo nuevo
+function tramos(l) {
+  const hijosDe = new Map(), visto = new Set(), out = [];
+  for (const p of ordenados(l)) { const a = padre(l, p); if (a) { if (!hijosDe.has(a.id)) hijosDe.set(a.id, []); hijosDe.get(a.id).push(p); } }
+  const recorrer = inicio => {
+    const pila = [[inicio]];
+    while (pila.length) {
+      const t = pila.pop(); let q = t.at(-1);
+      visto.add(q.id);
+      for (;;) {
+        const hs = (hijosDe.get(q.id) || []).filter(h => !visto.has(h.id));
+        if (!hs.length) break;
+        hs.slice(1).forEach(h => pila.push([q, h]));
+        q = hs[0]; visto.add(q.id); t.push(q);
+      }
+      if (t.length > 1) out.push(t);
+    }
+  };
+  for (const p of ordenados(l)) if (!padre(l, p)) recorrer(p);
+  for (const p of ordenados(l)) if (!visto.has(p.id)) recorrer(p); // datos con ciclo
+  return out;
+}
+
+// ---- Ángulo de la línea en cada poste y estructura ENEE sugerida
+function rumbo(a, b) {
+  const k = Math.PI / 180, f1 = a.lat * k, f2 = b.lat * k, dl = (b.lon - a.lon) * k;
+  const y = Math.sin(dl) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+  return (Math.atan2(y, x) / k + 360) % 360;
+}
+// paso: la línea pasa por el poste (ángulo de deflexión); derivación: 3 o más conexiones; remate: fin de línea
+function geometria(l, p) {
+  const vec = [padre(l, p), ...hijos(l, p)].filter(Boolean);
+  if (!vec.length) return null;
+  if (vec.length === 1) return { tipo: "remate", conexiones: 1 };
+  const r = vec.map(x => rumbo(p, x));
+  let defl = 180;
+  for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) {
+    let a = Math.abs(r[i] - r[j]) % 360; if (a > 180) a = 360 - a;
+    defl = Math.min(defl, 180 - a);
+  }
+  return { tipo: vec.length > 2 ? "derivacion" : "paso", angulo: defl, conexiones: vec.length };
+}
+function textoAngulo(g) {
+  if (!g) return "";
+  if (g.tipo === "remate") return "Fin de línea (remate)";
+  const a = g.angulo;
+  const rango = a <= 5 ? "tangente 0°–5°" : a <= 30 ? "ángulo 5°–30°" : a <= 60 ? "30°–60°" : a <= 90 ? "60°–90°" : "más de 90°";
+  return `${Math.round(a)}° (${rango})${g.tipo === "derivacion" ? " con derivación" : ""}`;
+}
+const SERIES_P = ["A-I", "A-II", "A-III", "DT-III", "DTN-III"];
+const serieDe = c => SERIES_P.find(s => String(c).startsWith(s + "-"));
+function seriesPoste(l, p) {
+  const de = q => (q?.primarias || []).map(serieDe).filter(Boolean);
+  let s = de(p);
+  if (!s.length) s = de(padre(l, p));
+  if (!s.length) s = hijos(l, p).flatMap(de);
+  return [...new Set(s.length ? s : ["A-I", "A-II", "A-III"])];
+}
+function sugerencias(l, p) {
+  const g = geometria(l, p);
+  if (!g) return { g, prim: [], neutro: [] };
+  let nums, neutro;
+  if (g.tipo === "remate") { nums = ["4"]; neutro = ["B-I-4"]; }
+  else {
+    const a = g.angulo, d = g.tipo === "derivacion";
+    nums = a <= 5 ? [d ? "7" : "1"] : a <= 30 ? [d ? "8" : "2"] : a <= 60 ? (d ? ["9"] : ["3", "5"]) : (d ? ["6A", "6B"] : ["6"]);
+    neutro = d ? ["B-I-7"] : a <= 30 ? ["B-I-1"] : a <= 60 ? ["B-I-5"] : ["B-I-6"];
+  }
+  return { g, prim: seriesPoste(l, p).flatMap(s => nums.map(n => `${s}-${n}`)).filter(c => EST_DESC[c]), neutro: neutro.filter(c => EST_DESC[c]) };
+}
+
+// ---- Coordenadas UTM (WGS84). Honduras está en la zona 16N.
+function utm(lat, lon, zonaFija) {
+  const zona = zonaFija || Math.floor((lon + 180) / 6) + 1;
+  const a = 6378137, f = 1 / 298.257223563, k0 = 0.9996, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const k = Math.PI / 180, fi = lat * k, l0 = ((zona - 1) * 6 - 177) * k;
+  const sf = Math.sin(fi), cf = Math.cos(fi), tf = Math.tan(fi);
+  const N = a / Math.sqrt(1 - e2 * sf * sf), T = tf * tf, C = ep2 * cf * cf, A = cf * (lon * k - l0);
+  const M = a * ((1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256) * fi - (3 * e2 / 8 + 3 * e2 ** 2 / 32 + 45 * e2 ** 3 / 1024) * Math.sin(2 * fi)
+    + (15 * e2 ** 2 / 256 + 45 * e2 ** 3 / 1024) * Math.sin(4 * fi) - (35 * e2 ** 3 / 3072) * Math.sin(6 * fi));
+  const e = k0 * N * (A + (1 - T + C) * A ** 3 / 6 + (5 - 18 * T + T * T + 72 * C - 58 * ep2) * A ** 5 / 120) + 500000;
+  let n = k0 * (M + N * tf * (A * A / 2 + (5 - T + 9 * C + 4 * C * C) * A ** 4 / 24 + (61 - 58 * T + T * T + 600 * C - 330 * ep2) * A ** 6 / 720));
+  if (lat < 0) n += 10000000;
+  return { zona, hemi: lat < 0 ? "S" : "N", e, n };
+}
+const textoUTM = (lat, lon) => { const u = utm(lat, lon); return `${u.zona}${u.hemi} · E ${Math.round(u.e)} · N ${Math.round(u.n)}`; };
+
+// ---- Cable del vano (desde el poste al que se conecta hasta este)
+const textoCable = p => [p.cableMT && `${p.cableFases ? p.cableFases + " " : ""}${p.cableMT}`, p.cableN && `N ${p.cableN}`, p.cableBT && `BT ${p.cableBT}`].filter(Boolean).join(" + ");
 function longRec(l) { const r = l.recorrido; let t = 0; for (let i = 1; i < r.length; i++) t += dist(r[i - 1], r[i]); return t; }
 function alturaTexto(p) {
   if (p.altura == null) return "";
@@ -476,11 +602,18 @@ function filasExport(l, p) {
   const f = [["Número", p.numero]];
   if (l.circuito) f.push(["Circuito", l.circuito]);
   f.push(["Coordenadas", `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`]);
+  f.push(["UTM", textoUTM(p.lat, p.lon)]);
   if (p.precision != null) f.push(["Precisión GPS", `±${Math.round(p.precision)} m`]);
   f.push(["Fecha", fmtFechaHora(p.fecha)]);
   f.push(...detalles(p));
-  const v = vano(l, p);
-  if (v != null) f.push([`Vano desde ${anterior(l, p).nombre}`, `${v.toFixed(1)} m`]);
+  const v = vano(l, p), a = padre(l, p);
+  if (v != null) f.push([`Vano desde ${a.nombre}`, `${v.toFixed(1)} m`]);
+  else f.push(["Conexión", "Inicio de línea"]);
+  if (a && textoCable(p)) f.push(["Cable del vano", textoCable(p)]);
+  const g = geometria(l, p);
+  if (g) f.push(["Ángulo de línea", textoAngulo(g)]);
+  const hs = hijos(l, p);
+  if (hs.length > 1) f.push(["Derivan", hs.map(h => h.nombre).join(", ")]);
   if (p.fotos.length) f.push(["Fotos", p.fotos.map((_, i) => nombreFoto(p, i)).join(", ")]);
   return f.map(([k, v]) => [k, String(v)]);
 }
@@ -575,7 +708,7 @@ function iniciarMapa() {
 function dibujar() {
   const o = ordenados(lev);
   lineaRec.setLatLngs(lev.recorrido.map(t => [t[0], t[1]]));
-  lineaPostes.setLatLngs(o.map(p => [p.lat, p.lon]));
+  lineaPostes.setLatLngs(tramos(lev).map(t => t.map(p => [p.lat, p.lon])));
   capaPostes.clearLayers();
   for (const p of o) {
     const html = `<div class="poste e-${esc(p.estado)}">${p.numero}${p.transformador ? '<span class="tr">⚡</span>' : ""}</div>`;
@@ -601,6 +734,8 @@ function abrirLev(l) {
   lev = l;
   if (!Array.isArray(lev.recorrido)) lev.recorrido = [];
   lev.postes.forEach(normPoste);
+  // postes antiguos: se conectan al de número anterior
+  for (const p of ordenados(lev)) if (p.conectadoA === undefined) p.conectadoA = anterior(lev, p)?.id ?? null;
   $("#m-nombre").textContent = lev.nombre;
   $("#m-circuito").textContent = lev.circuito ? "Circuito " + lev.circuito : "";
   $("#v-lista").hidden = true; $("#v-mapa").hidden = false;
@@ -702,7 +837,7 @@ function actualizarColocar() {
   const d = actual ? dist(actual, [c.lat, c.lng]) : null;
   const lejos = d == null ? "" : d < 1 ? " · en tu ubicación" : ` · a ${fmtDist(d)} de ti`;
   $("#info-txt").innerHTML = `<b>${esc(colocando.titulo)}</b>: mueve el mapa hasta poner la marca sobre el poste<br>` +
-    `<span class="mono">${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}</span>${lejos}`;
+    `<span class="mono">${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}</span>${lejos}<br><span class="mono">UTM ${textoUTM(c.lat, c.lng)}</span>`;
 }
 function salirColocar() {
   colocando = null;
@@ -731,6 +866,9 @@ function crearPoste(pos, enGps) {
     lat: pos[0], lon: pos[1], precision: enGps ? precision : null, fecha: new Date().toISOString(),
     // tipo y altura se copian del poste anterior para ir más rápido
     tipoPoste: prev?.tipoPoste || "Concreto", altura: prev?.altura ?? null, unidadAltura: prev?.unidadAltura || "ft",
+    // se conecta al último poste marcado; el cable del vano se copia de ese poste
+    conectadoA: prev?.id ?? null,
+    cableFases: prev?.cableFases || "", cableMT: prev?.cableMT || "", cableN: prev?.cableN || "", cableBT: prev?.cableBT || "",
     primarias: [], secundarias: [], retenidas: 0, tipoRetenida: "", lamparas: 0, tipoLampara: "",
     transformador: false, kva: "", fases: "", cuchillas: 0, tipoCuchilla: "", estado: "Bueno", obs: "", fotos: [],
   }, true);
@@ -738,12 +876,14 @@ function crearPoste(pos, enGps) {
 
 async function verPoste(p) {
   if (colocando) return;
-  const v = vano(lev, p);
+  const v = vano(lev, p), a = padre(lev, p), g = geometria(lev, p), hs = hijos(lev, p);
   const h = abrirHoja(`
     <div class="cab"><div class="poste e-${esc(p.estado)}">${p.numero}${p.transformador ? '<span class="tr">⚡</span>' : ""}</div>
       <div class="titulo"><h2>${esc(p.nombre)}</h2></div></div>
-    <p class="mono" style="font-size:.85rem">${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}${p.precision != null ? ` · ±${Math.round(p.precision)} m` : " · marcado en el mapa"}</p>
-    ${v != null ? `<p class="nota">Vano desde ${esc(anterior(lev, p).nombre)}: <span class="mono">${v.toFixed(1)} m</span></p>` : ""}
+    <p class="mono" style="font-size:.85rem">${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}${p.precision != null ? ` · ±${Math.round(p.precision)} m` : " · marcado en el mapa"}<br>UTM ${textoUTM(p.lat, p.lon)}</p>
+    ${v != null ? `<p class="nota">Vano desde ${esc(a.nombre)}: <span class="mono">${v.toFixed(1)} m</span>${textoCable(p) ? `<br><span style="font-weight:500">Cable: ${esc(textoCable(p))}</span>` : ""}</p>` : `<p class="nota">Inicio de línea</p>`}
+    ${g ? `<p class="nota">Ángulo de línea: ${esc(textoAngulo(g))}</p>` : ""}
+    ${hs.length > 1 ? `<p class="nota">Derivan: ${esc(hs.map(x => x.nombre).join(", "))}</p>` : ""}
     <dl class="det">${detalles(p).map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>
     ${p.fotos.length ? `<div class="miniaturas">${p.fotos.map(id => `<img data-foto="${esc(id)}" alt="Foto del poste">`).join("")}</div>` : ""}
     <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn sec" id="d-mover">Mover</button><button class="btn sec" id="d-wa">WhatsApp</button><button class="btn pri" id="d-editar">Editar</button></div>`);
@@ -761,6 +901,9 @@ async function verPoste(p) {
     cerrarHoja();
     if (!await confirmar(`¿Eliminar ${p.nombre}?`, "Se borrarán también sus fotos.", "Eliminar", true)) return;
     for (const f of p.fotos) await DB.del("fotos", f);
+    // los postes que colgaban de este se conectan al anterior
+    const arriba = padre(lev, p)?.id ?? null;
+    for (const x of hijos(lev, p)) x.conectadoA = arriba;
     lev.postes = lev.postes.filter(x => x.id !== p.id);
     await guardar(); dibujar();
   };
@@ -771,8 +914,9 @@ function listaPostes() {
   const o = ordenados(lev);
   if (!o.length) { toast("Todavía no hay postes marcados"); return; }
   const h = abrirHoja(`<h2>Postes (${o.length})</h2><p>Línea total ${fmtDist(longLinea(lev))}</p>` + o.map(p => {
-    const v = vano(lev, p);
-    const info = [p.tipoPoste, p.altura != null && `${numFmt(p.altura)} ${p.unidadAltura}`, textoEstr(p.primarias), v != null && `vano ${Math.round(v)} m`, p.fotos.length && `${p.fotos.length} fotos`].filter(Boolean).join(" · ");
+    const v = vano(lev, p), a = padre(lev, p);
+    const rama = a && a.numero !== p.numero - 1 ? `desde ${a.nombre}` : "";
+    const info = [rama, p.tipoPoste, p.altura != null && `${numFmt(p.altura)} ${p.unidadAltura}`, textoEstr(p.primarias), v != null && `vano ${Math.round(v)} m`, p.fotos.length && `${p.fotos.length} fotos`].filter(Boolean).join(" · ");
     return `<button class="fila-p" data-id="${esc(p.id)}"><div class="poste e-${esc(p.estado)}">${p.numero}</div><div class="txt"><b>${esc(p.nombre)}</b><small>${esc(info)}</small></div></button>`;
   }).join(""));
   $$("[data-id]", h).forEach(b => b.onclick = () => {
@@ -852,12 +996,13 @@ function abrirForm(p, nuevo) {
   fPoste = p; fNuevo = nuevo;
   fs = { tipoPoste: p.tipoPoste, unidadAltura: p.unidadAltura, estado: p.estado, fases: p.fases,
     retenidas: p.retenidas, lamparas: p.lamparas, cuchillas: p.cuchillas,
-    primarias: [...(p.primarias || [])], secundarias: [...(p.secundarias || [])] };
+    primarias: [...(p.primarias || [])], secundarias: [...(p.secundarias || [])], cableFases: p.cableFases || "" };
   fFotos = [...p.fotos]; fFotosNuevas = [];
   $("#f-titulo").textContent = nuevo ? "Nuevo poste" : "Editar poste";
   $("#f-coords").textContent = `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}` + (p.precision != null ? `  ±${Math.round(p.precision)} m` : "  (mapa)");
-  const v = vano(lev, p);
-  IN("vano").textContent = v != null ? `Vano desde ${anterior(lev, p).nombre}: ${v.toFixed(1)} m` : "Primer poste de la línea";
+  IN("utm").textContent = "UTM " + textoUTM(p.lat, p.lon);
+  llenarConexion(p, p.conectadoA === undefined ? padre(lev, p)?.id : p.conectadoA);
+  IN("cableMT").value = p.cableMT || ""; IN("cableN").value = p.cableN || ""; IN("cableBT").value = p.cableBT || "";
   IN("nombre").value = p.nombre;
   IN("altura").value = p.altura != null ? numFmt(p.altura) : "";
   llenarSelAgregar(IN("primaria")); llenarSelAgregar(IN("secundaria"));
@@ -865,8 +1010,40 @@ function abrirForm(p, nuevo) {
   IN("kva").value = p.kva; IN("tipoCuchilla").value = p.tipoCuchilla; IN("obs").value = p.obs;
   IN("trafo").checked = p.transformador;
   renderForm();
+  actualizarConexion();
   $("#p-form").hidden = false;
   $("#form").scrollTop = 0;
+}
+
+// Lista de postes a los que se puede conectar (sin él mismo ni los que cuelgan de él), del más cercano al más lejano
+function llenarConexion(p, valor) {
+  const excl = lev.postes.some(x => x.id === p.id) ? descendientes(lev, p) : new Set([p.id]);
+  const ops = lev.postes.filter(x => !excl.has(x.id)).map(x => [x, dist([x.lat, x.lon], [p.lat, p.lon])]).sort((a, b) => a[1] - b[1]);
+  IN("conexion").innerHTML = `<option value="">— Inicio de línea (no viene de otro poste) —</option>` +
+    ops.map(([x, d]) => `<option value="${esc(x.id)}">${esc(x.nombre)} · a ${fmtDist(d)}</option>`).join("");
+  IN("conexion").value = valor || "";
+}
+const conexionForm = () => IN("conexion").value || null;
+function actualizarConexion() {
+  const p = fPoste, id = conexionForm(), a = id ? lev.postes.find(x => x.id === id) : null;
+  IN("vano").textContent = a ? `Vano desde ${a.nombre}: ${dist([a.lat, a.lon], [p.lat, p.lon]).toFixed(1)} m` : "Inicio de línea";
+  $("#f-sec-cable").hidden = !a;
+  if (a) IN("cable-desde").textContent = `Cable entre ${a.nombre} y este poste`;
+  renderAngulo();
+}
+// Cuadro con el ángulo de la línea y las estructuras ENEE sugeridas
+function renderAngulo() {
+  const box = IN("angulo");
+  const tmp = { ...fPoste, conectadoA: conexionForm(), primarias: fs.primarias };
+  const { g, prim, neutro } = sugerencias(lev, tmp);
+  if (!g) { box.hidden = true; return; }
+  box.hidden = false;
+  const finProvisional = g.tipo === "remate" && !hijos(lev, tmp).length && fNuevo;
+  const chip = (c, campo) => `<button type="button" data-sug="${esc(c)}" data-campo-sug="${campo}" title="${esc(EST_DESC[c] || "")}" aria-pressed="${fs[campo].includes(c)}">+ ${esc(c)}</button>`;
+  box.innerHTML = `<div><b>Ángulo de la línea:</b> ${esc(textoAngulo(g))}</div>` +
+    (finProvisional ? `<div class="sug-nota">Por ahora es el final de la línea. El ángulo se calcula cuando marques el poste siguiente.</div>` : "") +
+    (prim.length ? `<div class="sug-fila"><span>Primaria sugerida</span><div class="chips">${prim.map(c => chip(c, "primarias")).join("")}</div></div>` : "") +
+    (neutro.length ? `<div class="sug-fila"><span>Neutro sugerido</span><div class="chips">${neutro.map(c => chip(c, "secundarias")).join("")}</div></div>` : "");
 }
 
 function renderForm() {
@@ -890,6 +1067,7 @@ function renderForm() {
 
 const ENTRADA_ESTR = { primarias: "primaria", secundarias: "secundaria" };
 function renderEstructuras() {
+  if (fPoste) renderAngulo();
   for (const campo of ["primarias", "secundarias"]) {
     const cont = $(`[data-estr="${campo}"] .estr-lista`);
     const g = agrupar(fs[campo]);
@@ -961,12 +1139,16 @@ async function guardarForm(e) {
     transformador: trafo, kva: trafo ? IN("kva").value.trim() : "", fases: trafo ? (fs.fases || "") : "",
     cuchillas: fs.cuchillas, tipoCuchilla: fs.cuchillas > 0 ? IN("tipoCuchilla").value.trim() : "",
     estado: fs.estado, obs: IN("obs").value.trim(), fotos: [...fFotos],
+    conectadoA: conexionForm(),
+    cableFases: fs.cableFases || "", cableMT: IN("cableMT").value.trim(), cableN: IN("cableN").value.trim(), cableBT: IN("cableBT").value.trim(),
   });
   if (fNuevo) lev.postes.push(p);
   // La pantalla se actualiza de inmediato; el guardado sigue en segundo plano.
   $("#p-form").hidden = true; fPoste = null;
   dibujar();
-  toast(`${p.nombre} guardado`);
+  // al marcar un poste nuevo, ya se conoce el ángulo del poste del que viene
+  const a = padre(lev, p), ga = a && geometria(lev, a);
+  toast(fNuevo && ga ? `${p.nombre} guardado · ${a.nombre}: ${textoAngulo(ga)}` : `${p.nombre} guardado`);
   for (const id of quitadas) DB.del("fotos", id).catch(() => {});
   guardar();
 }
@@ -987,11 +1169,11 @@ function gpx(l) {
     for (const t of l.recorrido) out.push(`<trkpt lat="${t[0]}" lon="${t[1]}">${t[2] ? `<time>${new Date(t[2]).toISOString()}</time>` : ""}</trkpt>`);
     out.push("</trkseg></trk>");
   }
-  const o = ordenados(l);
-  if (o.length > 1) {
-    out.push("<trk><name>Línea de postes</name><trkseg>");
-    for (const p of o) out.push(`<trkpt lat="${p.lat}" lon="${p.lon}"></trkpt>`);
-    out.push("</trkseg></trk>");
+  const ts = tramos(l);
+  if (ts.length) {
+    out.push("<trk><name>Línea de postes</name>");
+    for (const t of ts) out.push("<trkseg>" + t.map(p => `<trkpt lat="${p.lat}" lon="${p.lon}"></trkpt>`).join("") + "</trkseg>");
+    out.push("</trk>");
   }
   out.push("</gpx>");
   return out.join("\n");
@@ -1018,11 +1200,16 @@ function kml(l) {
     out.push("</ExtendedData>", `<Point><coordinates>${p.lon},${p.lat},0</coordinates></Point>`, "</Placemark>");
   }
   out.push("</Folder>");
-  const o = ordenados(l);
-  if (o.length > 1) {
-    out.push("<Folder><name>Línea</name><Placemark>", `<name>Línea de postes (${Math.round(longLinea(l))} m)</name>`,
-      '<styleUrl>#linea</styleUrl><LineString><tessellate>1</tessellate><coordinates>', o.map(p => `${p.lon},${p.lat},0`).join(" "),
-      "</coordinates></LineString></Placemark></Folder>");
+  const vs = vanos(l);
+  if (vs.length) {
+    out.push(`<Folder><name>Línea (${Math.round(longLinea(l))} m)</name>`);
+    for (const [a, b] of vs) {
+      const desc = [`Vano: ${dist([a.lat, a.lon], [b.lat, b.lon]).toFixed(1)} m`, textoCable(b) && `Cable: ${textoCable(b)}`].filter(Boolean).join("<br/>");
+      out.push("<Placemark>", `<name>${escX(a.nombre)} → ${escX(b.nombre)}</name>`, `<description><![CDATA[${desc}]]></description>`,
+        '<styleUrl>#linea</styleUrl><LineString><tessellate>1</tessellate><coordinates>', `${a.lon},${a.lat},0 ${b.lon},${b.lat},0`,
+        "</coordinates></LineString></Placemark>");
+    }
+    out.push("</Folder>");
   }
   if (l.recorrido.length > 1) {
     out.push("<Folder><name>Recorrido</name><Placemark>", `<name>Recorrido (${Math.round(longRec(l))} m)</name>`,
@@ -1031,6 +1218,70 @@ function kml(l) {
   }
   out.push("</Document>", "</kml>");
   return out.join("\n");
+}
+
+// ---- AutoCAD: DXF (R12, el formato que abre cualquier versión) en coordenadas UTM, en metros
+function dxf(l) {
+  const o = ordenados(l);
+  if (!o.length) throw new Error("no hay postes para dibujar");
+  const zona = utm(o[0].lat, o[0].lon).zona;
+  const P = q => { const u = utm(q.lat ?? q[0], q.lon ?? q[1], zona); return [u.e, u.n]; };
+  const n = v => v.toFixed(3);
+  const tx = s => String(s).replace(/[^\x20-\x7e]/g, ch => "\\U+" + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0"));
+  const E = [];
+  const g = (...pares) => { for (let i = 0; i < pares.length; i += 2) E.push(String(pares[i]), String(pares[i + 1])); };
+  const texto = (capa, x, y, h, s, rot = 0, centro = false) => {
+    g(0, "TEXT", 8, capa, 10, n(x), 20, n(y), 30, "0.0", 40, n(h), 1, tx(s));
+    if (rot) g(50, n(rot));
+    if (centro) g(72, 1, 11, n(x), 21, n(y), 31, "0.0");
+  };
+  const polilinea = (capa, pts, cerrada = false) => {
+    g(0, "POLYLINE", 8, capa, 66, 1, 10, "0.0", 20, "0.0", 30, "0.0", 70, cerrada ? 1 : 0);
+    for (const [x, y] of pts) g(0, "VERTEX", 8, capa, 10, n(x), 20, n(y), 30, "0.0");
+    g(0, "SEQEND", 8, capa);
+  };
+  const xs = [], ys = [];
+  // vanos: línea, distancia arriba y cable abajo, alineados con el vano
+  for (const [a, b] of vanos(l)) {
+    const [x1, y1] = P(a), [x2, y2] = P(b);
+    g(0, "LINE", 8, "LINEA_MT", 10, n(x1), 20, n(y1), 30, "0.0", 11, n(x2), 21, n(y2), 31, "0.0");
+    let ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+    if (ang > 90) ang -= 180; if (ang <= -90) ang += 180;
+    const r = ang * Math.PI / 180, nx = -Math.sin(r), ny = Math.cos(r), mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    texto("VANOS", mx + nx * 0.8, my + ny * 0.8, 1.2, `${dist([a.lat, a.lon], [b.lat, b.lon]).toFixed(1)} m`, ang, true);
+    if (textoCable(b)) texto("CABLES", mx - nx * 2.0, my - ny * 2.0, 1.0, textoCable(b), ang, true);
+  }
+  // postes: círculo, nombre y estructuras
+  for (const p of o) {
+    const [x, y] = P(p); xs.push(x); ys.push(y);
+    g(0, "CIRCLE", 8, "POSTES", 10, n(x), 20, n(y), 30, "0.0", 40, "0.800");
+    texto("NOMBRES", x + 1.5, y + 1.0, 2.0, p.nombre);
+    const lineas = [
+      ...agrupar(p.primarias).map(([c, k]) => k > 1 ? `${k}x ${c}` : c),
+      ...agrupar(p.secundarias).map(([c, k]) => k > 1 ? `${k}x ${c}` : c),
+      p.retenidas > 0 && `${p.retenidas}x ${p.tipoRetenida || "Retenida"}`,
+      `${p.tipoPoste}${p.altura != null ? ` ${numFmt(p.altura)} ${p.unidadAltura}` : ""}`,
+    ].filter(Boolean);
+    lineas.forEach((t, i) => texto("ESTRUCTURAS", x + 1.5, y - 1.0 - i * 1.6, 1.2, t));
+    if (p.transformador) {
+      polilinea("TRANSFORMADORES", [[x - 3.5, y - 3.6], [x - 1.5, y - 3.6], [x - 2.5, y - 1.8]], true);
+      texto("TRANSFORMADORES", x - 2.5, y - 5.4, 1.2, ["TR", p.kva && `${p.kva} kVA`, p.fases].filter(Boolean).join(" "), 0, true);
+    }
+  }
+  if (l.recorrido.length > 1) polilinea("RECORRIDO", l.recorrido.map(t => P([t[0], t[1]])));
+  const capas = [["POSTES", 7], ["NOMBRES", 3], ["ESTRUCTURAS", 5], ["LINEA_MT", 1], ["VANOS", 4], ["CABLES", 6], ["TRANSFORMADORES", 30], ["RECORRIDO", 8]];
+  const H = [];
+  const h = (...pares) => { for (let i = 0; i < pares.length; i += 2) H.push(String(pares[i]), String(pares[i + 1])); };
+  const mx = Math.min(...xs) - 20, my = Math.min(...ys) - 20, Mx = Math.max(...xs) + 20, My = Math.max(...ys) + 20;
+  h(0, "SECTION", 2, "HEADER", 9, "$ACADVER", 1, "AC1009", 9, "$INSBASE", 10, "0.0", 20, "0.0", 30, "0.0",
+    9, "$EXTMIN", 10, n(mx), 20, n(my), 30, "0.0", 9, "$EXTMAX", 10, n(Mx), 20, n(My), 30, "0.0", 0, "ENDSEC");
+  h(0, "SECTION", 2, "TABLES",
+    0, "TABLE", 2, "LTYPE", 70, 1, 0, "LTYPE", 2, "CONTINUOUS", 70, 64, 3, "Solid line", 72, 65, 73, 0, 40, "0.0", 0, "ENDTAB",
+    0, "TABLE", 2, "LAYER", 70, capas.length);
+  for (const [c, col] of capas) h(0, "LAYER", 2, c, 70, 0, 62, col, 6, "CONTINUOUS");
+  h(0, "ENDTAB", 0, "TABLE", 2, "STYLE", 70, 1, 0, "STYLE", 2, "STANDARD", 70, 0, 40, "0.0", 41, "1.0", 50, "0.0", 71, 0, 42, "2.5", 3, "txt", 4, "", 0, "ENDTAB",
+    0, "ENDSEC", 0, "SECTION", 2, "ENTITIES");
+  return [...H, ...E, "0", "ENDSEC", "0", "EOF"].join("\r\n") + "\r\n";
 }
 
 async function kmz(l) {
@@ -1043,10 +1294,11 @@ async function kmz(l) {
 async function zipFotos(l) {
   const zip = new JSZip();
   const raiz = zip.folder(`Fotos_${limpio(l.nombre) || "levantamiento"}`);
-  const csv = ["Numero,Poste,Latitud,Longitud,Estado,Fotos"];
+  const csv = ["Numero,Poste,Latitud,Longitud,UTM Zona,UTM Este,UTM Norte,Estado,Fotos"];
   let total = 0;
   for (const p of ordenados(l)) {
-    csv.push([p.numero, `"${p.nombre.replace(/"/g, '""')}"`, p.lat.toFixed(6), p.lon.toFixed(6), p.estado, p.fotos.length].join(","));
+    const u = utm(p.lat, p.lon);
+    csv.push([p.numero, `"${p.nombre.replace(/"/g, '""')}"`, p.lat.toFixed(6), p.lon.toFixed(6), u.zona + u.hemi, u.e.toFixed(2), u.n.toFixed(2), p.estado, p.fotos.length].join(","));
     if (!p.fotos.length) continue;
     const carpeta = raiz.folder(limpio(p.nombre) || "poste_" + p.numero);
     for (let i = 0; i < p.fotos.length; i++) {
@@ -1070,7 +1322,7 @@ async function archivosFoto(postes) {
 
 const linkMaps = p => `https://maps.google.com/?q=${p.lat.toFixed(6)},${p.lon.toFixed(6)}`;
 function textoPoste(l, p) {
-  return [`*${p.nombre}* (${l.nombre})`, ...detalles(p).map(([k, v]) => `${k}: ${v}`), `Ubicación: ${linkMaps(p)}`].join("\n");
+  return [`*${p.nombre}* (${l.nombre})`, ...filasExport(l, p).filter(([k]) => !/^(Número|Circuito|Fecha|Fotos|Precisión)/.test(k)).map(([k, v]) => `${k}: ${v}`), `Ubicación: ${linkMaps(p)}`].join("\n");
 }
 function textoResumen(l) {
   const o = ordenados(l);
@@ -1113,6 +1365,7 @@ async function generarArchivo(f) {
   else if (f === "kml") blob = new Blob([kml(lev)], { type: "application/vnd.google-earth.kml+xml" });
   else if (f === "kmz") blob = await kmz(lev);
   else if (f === "fotos") blob = await zipFotos(lev);
+  else if (f === "dxf") blob = new Blob([dxf(lev)], { type: "application/dxf" });
   else blob = new Blob([await respaldo(lev)], { type: "application/json" });
   const ext = f === "json" ? "json" : f === "fotos" ? "zip" : f;
   return { blob, nombre: (f === "fotos" ? "Fotos_" : "") + nombreArchivo(lev, ext) };
@@ -1172,6 +1425,7 @@ function menuExportar() {
     <div class="opciones">
       <button data-f="kmz"><b>KMZ</b><span>Google Earth (solo el mapa, sin fotos)</span></button>
       <button data-f="fotos"><b>Carpeta de fotos (.zip)</b><span>Una carpeta por poste: P-001_1.jpg, P-001_2.jpg… y lista de postes</span></button>
+      <button data-f="dxf"><b>AutoCAD (DXF)</b><span>Plano en coordenadas UTM ${utm(lev.postes[0]?.lat ?? 14, lev.postes[0]?.lon ?? -87).zona}N, en metros: postes, línea, vanos, cables y estructuras por capas</span></button>
       <button data-f="kml"><b>KML</b><span>Google Earth, QGIS, AutoCAD Map, Global Mapper</span></button>
       <button data-f="gpx"><b>GPX</b><span>GPS de mano, apps de navegación</span></button>
       <button data-f="json"><b>Respaldo completo</b><span>Para guardar o pasar a otro teléfono (incluye fotos)</span></button>
@@ -1181,6 +1435,7 @@ function menuExportar() {
       <button type="button" data-wf="kmz">KMZ</button>
       <button type="button" data-wf="kml">KML</button>
       <button type="button" data-wf="gpx">GPX</button>
+      <button type="button" data-wf="dxf">DXF</button>
       <button type="button" data-wf="fotos">Carpeta de fotos</button>
     </div>
     <div class="opciones">
@@ -1260,7 +1515,7 @@ function confirmar(titulo, texto, ok = "Aceptar", peligro = false) {
 
 // ------------------------------------------------------------ Eventos
 function enlazar() {
-  for (const [id, k] of [["lampara", "lampara"], ["cuchilla", "cuchilla"], ["kva", "kva"]]) {
+  for (const [id, k] of [["cableMT", "cableMT"], ["cableN", "cableN"], ["cableBT", "cableBT"], ["lampara", "lampara"], ["cuchilla", "cuchilla"], ["kva", "kva"]]) {
     $("#dl-" + id).innerHTML = OPC[k].map(o => `<option value="${esc(o)}"></option>`).join("");
   }
   $("#btn-nuevo").onclick = nuevoLev;
@@ -1303,7 +1558,17 @@ function enlazar() {
   $("#f-cancelar").onclick = cancelarForm;
   form.addEventListener("click", e => {
     const chip = e.target.closest("[data-valor]");
-    if (chip) { const c = chip.closest("[data-campo]"); fs[c.dataset.campo] = chip.dataset.valor; renderForm(); return; }
+    if (chip) {
+      const c = chip.closest("[data-campo]"), campo = c.dataset.campo, v = chip.dataset.valor;
+      fs[campo] = campo === "cableFases" && fs[campo] === v ? "" : v;
+      renderForm(); return;
+    }
+    const sug = e.target.closest("[data-sug]");
+    if (sug) {
+      const l = fs[sug.dataset.campoSug];
+      if (!l.includes(sug.dataset.sug)) { l.push(sug.dataset.sug); toast(`Agregada: ${sug.dataset.sug}`); }
+      renderEstructuras(); return;
+    }
     const alt = e.target.closest("[data-altura]");
     if (alt) { IN("altura").value = alt.dataset.altura; return; }
     const d = e.target.closest("[data-d]");
@@ -1324,6 +1589,7 @@ function enlazar() {
     if (q) { fFotos = fFotos.filter(id => id !== q.dataset.quitar); renderFotosForm(); }
   });
   IN("trafo").onchange = renderForm;
+  IN("conexion").onchange = actualizarConexion;
   // al elegir un código del catálogo, se agrega a la lista del poste
   for (const [campo, id] of Object.entries(ENTRADA_ESTR)) IN(id).addEventListener("change", () => agregarEstr(campo));
   $("#f-btn-cam").onclick = () => IN("cam").click();
