@@ -31,8 +31,20 @@ jobs:
       - name: Instalar dependencias
         run: npm install --no-audit --no-fund
 
-      - name: Copiar la app
-        run: mkdir -p www && cp ../index.html www/index.html
+      - name: Copiar la app (con el mapa incluido, para abrir sin internet)
+        run: |
+          mkdir -p www/lib
+          cp ../index.html www/index.html
+          cp node_modules/leaflet/dist/leaflet.css node_modules/leaflet/dist/leaflet.js \
+             node_modules/leaflet-rotate/dist/leaflet-rotate-src.js node_modules/jszip/dist/jszip.min.js www/lib/
+          cp -r node_modules/leaflet/dist/images www/lib/
+          sed -i \
+            -e 's#https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css#lib/leaflet.css#' \
+            -e 's#https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js#lib/leaflet.js#' \
+            -e 's#https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js#lib/leaflet-rotate-src.js#' \
+            -e 's#https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js#lib/jszip.min.js#' \
+            www/index.html
+          echo "Librerías externas que quedan:"; grep -oE 'src="https?://[^"]+"' www/index.html || echo "ninguna"
 
       - name: Crear proyecto Android
         run: npx cap add android

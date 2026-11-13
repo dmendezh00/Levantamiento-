@@ -85,6 +85,9 @@ button{cursor:pointer}
 .flotantes button{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);display:grid;place-items:center;font-size:.7rem;font-weight:700}
 .flotantes svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
 .flotantes button.on{color:var(--accent)}
+#aguja{transition:transform .1s linear}
+#btn-norte:not(.girado){opacity:.85}
+#btn-norte.girado{border-color:var(--accent)}
 .acciones{display:flex;gap:10px;background:var(--surface);border-top:1px solid var(--line);
   padding:10px max(12px,var(--safe-r)) calc(10px + var(--safe-b)) max(12px,var(--safe-l));z-index:500}
 .acciones .btn{flex:1} .acciones .pri{flex:2}
@@ -122,6 +125,8 @@ button{cursor:pointer}
 .campo{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
 .campo input,.campo textarea,.campo select{font-size:1rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:48px;width:100%}
 .campo input:focus,.campo textarea:focus,.campo select:focus{border-color:var(--accent);outline:none}
+.campo-in{font-size:1rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:48px;min-width:0;width:100%}
+.campo-in:focus{border-color:var(--accent);outline:none}
 .pila{display:flex;flex-direction:column;gap:12px}
 
 /* Formulario del poste */
@@ -136,8 +141,17 @@ button{cursor:pointer}
 .chips.estado button[aria-pressed="true"]{color:#fff;border-color:transparent}
 .chips.rapidas button{min-height:34px;font:500 .85rem var(--f-mono)}
 .fila{display:flex;gap:10px;align-items:flex-end}.crece{flex:1;min-width:0}
+.estr{display:flex;flex-direction:column;gap:8px}
+.estr-t{font-size:.85rem;color:var(--muted)}
+.estr-lista{display:flex;flex-direction:column;gap:6px}
+.estr-item{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.estr-item .nom{flex:1;min-width:0;overflow-wrap:anywhere}
+.estr-item output{min-width:28px;text-align:center;font:600 1rem var(--f-mono)}
+.estr-item button{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.1rem;line-height:1;flex:none}
+.estr-vacio{margin:0;color:var(--muted);font-size:.9rem}
+.estr .fila .btn{min-height:48px;padding:0 14px;flex:none}
 .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
-.seg button{min-width:52px;min-height:48px;border:0;background:var(--surface-2);font-weight:600}
+.seg button{min-width:52px;min-height:48px;padding:0 12px;border:0;background:var(--surface-2);font-weight:600}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
 .contador{display:flex;align-items:center;gap:8px}
 .contador span{flex:1}
@@ -180,6 +194,7 @@ button{cursor:pointer}
   <div id="mapa"><div id="mira" class="mira" hidden><span class="base"></span><svg viewBox="0 0 42 52" aria-hidden="true"><path d="M21 51C21 51 3 31 3 20a18 18 0 0136 0c0 11-18 31-18 31z" fill="#e8590c" stroke="#fff" stroke-width="3"/><circle cx="21" cy="20" r="7" fill="#fff"/></svg></div></div>
   <div class="info"><span id="rec" class="rec" hidden></span><div id="info-txt"></div><span id="gps" class="gps">Sin GPS</span></div>
   <div class="flotantes">
+    <button id="btn-norte" type="button" aria-label="Orientar el mapa al norte"><svg id="aguja" viewBox="0 0 24 24"><path d="M12 2.5l4 9.5h-8z" fill="#e03131" stroke="none"/><path d="M12 21.5l-4-9.5h8z" fill="currentColor" stroke="none"/></svg></button>
     <button id="btn-capa" type="button" aria-label="Cambiar a vista satelital">SAT</button>
     <button id="btn-centrar" type="button" aria-label="Centrar en mi ubicación" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
   </div>
@@ -215,8 +230,16 @@ button{cursor:pointer}
     </fieldset>
 
     <fieldset class="sec"><legend>Estructuras</legend>
-      <label class="campo">Estructura primaria (ENEE)<select id="f-primaria" data-est="primaria"></select></label>
-      <label class="campo">Estructura secundaria / neutro (ENEE)<select id="f-secundaria" data-est="secundaria"></select></label>
+      <div class="estr" data-estr="primarias">
+        <span class="estr-t">Estructuras primarias (ENEE)</span>
+        <div class="estr-lista"></div>
+        <select id="f-primaria" class="campo-in" data-est="primaria" aria-label="Agregar estructura primaria"></select>
+      </div>
+      <div class="estr" data-estr="secundarias">
+        <span class="estr-t">Estructuras secundarias / neutro (ENEE)</span>
+        <div class="estr-lista"></div>
+        <select id="f-secundaria" class="campo-in" data-est="secundaria" aria-label="Agregar estructura secundaria"></select>
+      </div>
     </fieldset>
 
     <fieldset class="sec"><legend>Retenidas</legend>
@@ -254,6 +277,11 @@ button{cursor:pointer}
       </div>
       <input type="file" id="f-cam" accept="image/*" capture="environment" hidden>
       <input type="file" id="f-gal" accept="image/*" multiple hidden>
+      <div class="fila" style="align-items:center;flex-wrap:wrap">
+        <span class="estr-t">Calidad</span>
+        <div class="seg" id="f-calidad"></div>
+        <small id="f-calidad-ayuda" class="estr-t"></small>
+      </div>
       <p class="nota" id="f-nfotos" style="font-weight:500;color:var(--muted)"></p>
       <div class="fotos" id="f-fotos"></div>
     </fieldset>
@@ -268,6 +296,7 @@ button{cursor:pointer}
 <div id="toast" role="status" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 "use strict";
@@ -411,14 +440,28 @@ function alturaTexto(p) {
   if (p.altura == null) return "";
   return p.unidadAltura === "ft" ? `${numFmt(p.altura)} ft (${numFmt(p.altura * 0.3048)} m)` : `${numFmt(p.altura)} m`;
 }
+// Postes guardados antes tenían una sola estructura (texto); ahora son listas.
+function normPoste(p) {
+  if (!Array.isArray(p.primarias)) p.primarias = p.primaria ? [p.primaria] : [];
+  if (!Array.isArray(p.secundarias)) p.secundarias = p.secundaria ? [p.secundaria] : [];
+  delete p.primaria; delete p.secundaria;
+  return p;
+}
+// ["Tangente","Tangente","Remate"] -> [["Tangente",2],["Remate",1]]
+function agrupar(lista) {
+  const m = new Map();
+  for (const x of lista || []) m.set(x, (m.get(x) || 0) + 1);
+  return [...m];
+}
+const textoEstr = (lista, desc = false) => agrupar(lista).map(([n, c]) => { const t = desc ? conDesc(n) : n; return c > 1 ? `${c} × ${t}` : t; }).join(desc ? "; " : " + ");
 function detalles(p) {
   const d = [];
   const add = (k, v) => { if (v != null && String(v).trim()) d.push([k, String(v).trim()]); };
   const conTipo = (n, t) => t ? `${n} · ${t}` : String(n);
   add("Tipo de poste", p.tipoPoste);
   add("Altura", alturaTexto(p));
-  add("Estructura primaria", conDesc(p.primaria));
-  add("Estructura secundaria", conDesc(p.secundaria));
+  add(p.primarias?.length > 1 ? "Estructuras primarias" : "Estructura primaria", textoEstr(p.primarias, true));
+  add(p.secundarias?.length > 1 ? "Estructuras secundarias" : "Estructura secundaria", textoEstr(p.secundarias, true));
   if (p.retenidas > 0) add("Retenidas", conTipo(p.retenidas, conDesc(p.tipoRetenida)));
   if (p.lamparas > 0) add("Lámparas", conTipo(p.lamparas, p.tipoLampara));
   if (p.transformador) add("Transformador", [p.kva && p.kva + " kVA", p.fases].filter(Boolean).join(" · ") || "Sí");
@@ -504,7 +547,15 @@ function nuevoLev() {
 // ------------------------------------------------------------ Mapa
 function iniciarMapa() {
   if (map) return;
-  map = L.map("mapa", { zoomControl: false, maxZoom: 20, attributionControl: true }).setView(CENTRO, 15);
+  // rotate: girar el mapa con dos dedos (leaflet-rotate). Si la librería no cargó, el mapa funciona sin giro.
+  map = L.map("mapa", { zoomControl: false, maxZoom: 20, attributionControl: true,
+    rotate: true, touchRotate: true, rotateControl: false, bearing: 0 }).setView(CENTRO, 15);
+  const aguja = () => {
+    const g = map.getBearing ? map.getBearing() : 0;
+    $("#aguja").style.transform = `rotate(${-g}deg)`;
+    $("#btn-norte").classList.toggle("girado", Math.abs(((g % 360) + 360) % 360) > 0.5);
+  };
+  map.on("rotate", aguja);
   capaCalles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, maxNativeZoom: 19, attribution: "© OpenStreetMap" });
   capaSat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 20, maxNativeZoom: 19, attribution: "Esri World Imagery" });
   capaCalles.addTo(map);
@@ -549,6 +600,7 @@ function actualizarGps() {
 function abrirLev(l) {
   lev = l;
   if (!Array.isArray(lev.recorrido)) lev.recorrido = [];
+  lev.postes.forEach(normPoste);
   $("#m-nombre").textContent = lev.nombre;
   $("#m-circuito").textContent = lev.circuito ? "Circuito " + lev.circuito : "";
   $("#v-lista").hidden = true; $("#v-mapa").hidden = false;
@@ -679,7 +731,7 @@ function crearPoste(pos, enGps) {
     lat: pos[0], lon: pos[1], precision: enGps ? precision : null, fecha: new Date().toISOString(),
     // tipo y altura se copian del poste anterior para ir más rápido
     tipoPoste: prev?.tipoPoste || "Concreto", altura: prev?.altura ?? null, unidadAltura: prev?.unidadAltura || "ft",
-    primaria: "", secundaria: "", retenidas: 0, tipoRetenida: "", lamparas: 0, tipoLampara: "",
+    primarias: [], secundarias: [], retenidas: 0, tipoRetenida: "", lamparas: 0, tipoLampara: "",
     transformador: false, kva: "", fases: "", cuchillas: 0, tipoCuchilla: "", estado: "Bueno", obs: "", fotos: [],
   }, true);
 }
@@ -720,7 +772,7 @@ function listaPostes() {
   if (!o.length) { toast("Todavía no hay postes marcados"); return; }
   const h = abrirHoja(`<h2>Postes (${o.length})</h2><p>Línea total ${fmtDist(longLinea(lev))}</p>` + o.map(p => {
     const v = vano(lev, p);
-    const info = [p.tipoPoste, p.altura != null && `${numFmt(p.altura)} ${p.unidadAltura}`, p.primaria, v != null && `vano ${Math.round(v)} m`, p.fotos.length && `${p.fotos.length} fotos`].filter(Boolean).join(" · ");
+    const info = [p.tipoPoste, p.altura != null && `${numFmt(p.altura)} ${p.unidadAltura}`, textoEstr(p.primarias), v != null && `vano ${Math.round(v)} m`, p.fotos.length && `${p.fotos.length} fotos`].filter(Boolean).join(" · ");
     return `<button class="fila-p" data-id="${esc(p.id)}"><div class="poste e-${esc(p.estado)}">${p.numero}</div><div class="txt"><b>${esc(p.nombre)}</b><small>${esc(info)}</small></div></button>`;
   }).join(""));
   $$("[data-id]", h).forEach(b => b.onclick = () => {
@@ -754,14 +806,36 @@ function verFoto(src) {
   v.onclick = () => v.remove();
   document.body.appendChild(v);
 }
-function reducirFoto(file, max = 1600, q = 0.75) {
+// Calidad de foto (se recuerda en el teléfono)
+const CALIDADES = {
+  normal: { max: 1600, q: 0.82, txt: "Normal", ayuda: "≈ 0.4 MB por foto" },
+  alta: { max: 3000, q: 0.92, txt: "Alta", ayuda: "≈ 1.5 MB por foto" },
+  original: { max: 0, q: 1, txt: "Original", ayuda: "Sin reducir, 3–8 MB por foto" },
+};
+let calidad = "alta";
+try { const c = localStorage.getItem("calidadFoto"); if (CALIDADES[c]) calidad = c; } catch {}
+function elegirCalidad(c) {
+  calidad = c;
+  try { localStorage.setItem("calidadFoto", c); } catch {}
+  renderCalidad();
+}
+function renderCalidad() {
+  IN("calidad").innerHTML = Object.entries(CALIDADES).map(([k, v]) =>
+    `<button type="button" data-calidad="${k}" aria-pressed="${k === calidad}">${v.txt}</button>`).join("");
+  IN("calidad-ayuda").textContent = CALIDADES[calidad].ayuda;
+}
+function reducirFoto(file) {
+  const { max, q } = CALIDADES[calidad];
+  if (!max) return Promise.resolve(file);
   return new Promise(res => {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => {
       const w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
       const c = document.createElement("canvas");
       c.width = Math.round(w * k); c.height = Math.round(h * k);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const ctx = c.getContext("2d");
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
       c.toBlob(b => res(b || file), "image/jpeg", q);
     };
@@ -777,7 +851,8 @@ const IN = id => $("#f-" + id);
 function abrirForm(p, nuevo) {
   fPoste = p; fNuevo = nuevo;
   fs = { tipoPoste: p.tipoPoste, unidadAltura: p.unidadAltura, estado: p.estado, fases: p.fases,
-    retenidas: p.retenidas, lamparas: p.lamparas, cuchillas: p.cuchillas };
+    retenidas: p.retenidas, lamparas: p.lamparas, cuchillas: p.cuchillas,
+    primarias: [...(p.primarias || [])], secundarias: [...(p.secundarias || [])] };
   fFotos = [...p.fotos]; fFotosNuevas = [];
   $("#f-titulo").textContent = nuevo ? "Nuevo poste" : "Editar poste";
   $("#f-coords").textContent = `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}` + (p.precision != null ? `  ±${Math.round(p.precision)} m` : "  (mapa)");
@@ -785,7 +860,7 @@ function abrirForm(p, nuevo) {
   IN("vano").textContent = v != null ? `Vano desde ${anterior(lev, p).nombre}: ${v.toFixed(1)} m` : "Primer poste de la línea";
   IN("nombre").value = p.nombre;
   IN("altura").value = p.altura != null ? numFmt(p.altura) : "";
-  llenarEst(IN("primaria"), p.primaria); llenarEst(IN("secundaria"), p.secundaria);
+  llenarSelAgregar(IN("primaria")); llenarSelAgregar(IN("secundaria"));
   llenarEst(IN("tipoRetenida"), p.tipoRetenida); IN("tipoLampara").value = p.tipoLampara;
   IN("kva").value = p.kva; IN("tipoCuchilla").value = p.tipoCuchilla; IN("obs").value = p.obs;
   IN("trafo").checked = p.transformador;
@@ -810,9 +885,38 @@ function renderForm() {
     el.hidden = k === "transformador" ? !IN("trafo").checked : !(fs[k] > 0);
   });
   renderFotosForm();
+  renderEstructuras();
+}
+
+const ENTRADA_ESTR = { primarias: "primaria", secundarias: "secundaria" };
+function renderEstructuras() {
+  for (const campo of ["primarias", "secundarias"]) {
+    const cont = $(`[data-estr="${campo}"] .estr-lista`);
+    const g = agrupar(fs[campo]);
+    cont.innerHTML = g.length ? g.map(([n, c]) => `
+      <div class="estr-item"><span class="nom"><b>${esc(n)}</b>${EST_DESC[n] ? `<br><small style="color:var(--muted)">${esc(EST_DESC[n])}</small>` : ""}</span>
+        <button type="button" data-estr-menos="${esc(n)}" data-campo-estr="${campo}" aria-label="Quitar una ${esc(n)}">−</button>
+        <output>${c}</output>
+        <button type="button" data-estr-mas="${esc(n)}" data-campo-estr="${campo}" aria-label="Agregar otra ${esc(n)}">+</button>
+      </div>`).join("") : `<p class="estr-vacio">Ninguna agregada</p>`;
+  }
+}
+// Selector del catálogo ENEE que agrega la estructura al elegirla
+function llenarSelAgregar(sel) {
+  llenarEst(sel, "");
+  sel.options[0].textContent = "+ Agregar estructura…";
+}
+function agregarEstr(campo) {
+  const sel = IN(ENTRADA_ESTR[campo]);
+  const v = sel.value.trim();
+  if (!v) return;
+  fs[campo].push(v); sel.value = "";
+  renderEstructuras();
+  toast(`Agregada: ${v}`);
 }
 
 function renderFotosForm() {
+  renderCalidad();
   const n = fFotos.length;
   IN("nfotos").textContent = n ? `${n} ${n === 1 ? "foto" : "fotos"}. Puedes agregar todas las que necesites.` : "Agrega una o varias fotos del poste.";
   IN("fotos").innerHTML = fFotos.map(id => `<div class="f"><img data-foto="${esc(id)}" alt="Foto del poste"><button type="button" class="x" data-quitar="${esc(id)}" aria-label="Quitar foto">✕</button></div>`).join("");
@@ -849,7 +953,9 @@ async function guardarForm(e) {
   const trafo = IN("trafo").checked;
   Object.assign(p, {
     nombre, altura, tipoPoste: fs.tipoPoste, unidadAltura: fs.unidadAltura,
-    primaria: IN("primaria").value.trim(), secundaria: IN("secundaria").value.trim(),
+    // si quedó algo escrito sin tocar "Agregar", también se guarda
+    primarias: [...fs.primarias, ...(IN("primaria").value.trim() ? [IN("primaria").value.trim()] : [])],
+    secundarias: [...fs.secundarias, ...(IN("secundaria").value.trim() ? [IN("secundaria").value.trim()] : [])],
     retenidas: fs.retenidas, tipoRetenida: fs.retenidas > 0 ? IN("tipoRetenida").value.trim() : "",
     lamparas: fs.lamparas, tipoLampara: fs.lamparas > 0 ? IN("tipoLampara").value.trim() : "",
     transformador: trafo, kva: trafo ? IN("kva").value.trim() : "", fases: trafo ? (fs.fases || "") : "",
@@ -972,7 +1078,7 @@ function textoResumen(l) {
     `${o.length} postes · línea ${fmtDist(longLinea(l))}`, ""];
   for (const p of o) {
     const v = vano(l, p);
-    lineas.push(`${p.nombre}: ${[p.tipoPoste, p.altura != null && numFmt(p.altura) + " " + p.unidadAltura, p.primaria, p.transformador && "transf. " + (p.kva ? p.kva + " kVA" : ""), p.estado !== "Bueno" && p.estado, v != null && "vano " + Math.round(v) + " m"].filter(Boolean).join(", ")} ${linkMaps(p)}`);
+    lineas.push(`${p.nombre}: ${[p.tipoPoste, p.altura != null && numFmt(p.altura) + " " + p.unidadAltura, textoEstr(p.primarias), p.transformador && "transf. " + (p.kva ? p.kva + " kVA" : ""), p.estado !== "Bueno" && p.estado, v != null && "vano " + Math.round(v) + " m"].filter(Boolean).join(", ")} ${linkMaps(p)}`);
   }
   let t = lineas.join("\n");
   if (t.length > 6000) t = t.slice(0, 6000) + "\n… (lista recortada; envía el KMZ para el detalle completo)";
@@ -1123,6 +1229,7 @@ async function importarRespaldo(file) {
       const blob = await (await fetch(dataUrl)).blob();
       await DB.put("fotos", { id, levId: d.lev.id, blob });
     }
+    (d.lev.postes || []).forEach(normPoste);
     await DB.put("levs", d.lev);
     toast(`Importado: ${d.lev.nombre}`);
     cargarLista();
@@ -1176,6 +1283,12 @@ function enlazar() {
     const b = $("#btn-capa"); b.textContent = satelite ? "MAPA" : "SAT";
     b.setAttribute("aria-label", satelite ? "Cambiar a mapa de calles" : "Cambiar a vista satelital");
   };
+  $("#btn-norte").onclick = () => {
+    if (!map.setBearing) { toast("Gira el mapa con dos dedos"); return; }
+    const g = map.getBearing();
+    if (Math.abs(g % 360) > 0.5) map.setBearing(0);
+    else toast("Gira el mapa con dos dedos. Toca la brújula para volver al norte.");
+  };
   $("#btn-centrar").onclick = () => {
     if (!actual) { toast("Esperando señal GPS…"); return; }
     seguir = true; $("#btn-centrar").classList.add("on");
@@ -1195,10 +1308,24 @@ function enlazar() {
     if (alt) { IN("altura").value = alt.dataset.altura; return; }
     const d = e.target.closest("[data-d]");
     if (d) { const c = d.closest(".contador"); fs[c.dataset.campo] = Math.max(0, fs[c.dataset.campo] + Number(d.dataset.d)); renderForm(); return; }
+    const cal = e.target.closest("[data-calidad]");
+    if (cal) { elegirCalidad(cal.dataset.calidad); return; }
+    const ag = e.target.closest("[data-agregar]");
+    if (ag) { agregarEstr(ag.dataset.agregar); return; }
+    const mas = e.target.closest("[data-estr-mas]");
+    if (mas) { fs[mas.dataset.campoEstr].push(mas.dataset.estrMas); renderEstructuras(); return; }
+    const menos = e.target.closest("[data-estr-menos]");
+    if (menos) {
+      const l = fs[menos.dataset.campoEstr], i = l.lastIndexOf(menos.dataset.estrMenos);
+      if (i >= 0) l.splice(i, 1);
+      renderEstructuras(); return;
+    }
     const q = e.target.closest("[data-quitar]");
     if (q) { fFotos = fFotos.filter(id => id !== q.dataset.quitar); renderFotosForm(); }
   });
   IN("trafo").onchange = renderForm;
+  // al elegir un código del catálogo, se agrega a la lista del poste
+  for (const [campo, id] of Object.entries(ENTRADA_ESTR)) IN(id).addEventListener("change", () => agregarEstr(campo));
   $("#f-btn-cam").onclick = () => IN("cam").click();
   $("#f-btn-gal").onclick = () => IN("gal").click();
   for (const id of ["cam", "gal"]) IN(id).onchange = e => { const fl = [...e.target.files]; e.target.value = ""; agregarFotos(fl); };
