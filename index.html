@@ -142,6 +142,10 @@ button{cursor:pointer}
 .chips.rapidas button{min-height:34px;font:500 .85rem var(--f-mono)}
 .fila{display:flex;gap:10px;align-items:flex-end}.crece{flex:1;min-width:0}
 .estr{display:flex;flex-direction:column;gap:8px}
+.deriv{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);font-size:.92rem}
+.deriv-fila{display:flex;gap:10px;align-items:baseline}
+.deriv-fila>span:last-child{min-width:0;overflow-wrap:anywhere}
+.deriv-t{flex:none;width:84px;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .sug{display:flex;flex-direction:column;gap:8px;background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:.92rem}
 .sug-nota{color:var(--muted);font-size:.85rem}
 .sug-fila{display:flex;flex-direction:column;gap:6px}
@@ -501,18 +505,41 @@ function rumbo(a, b) {
   const y = Math.sin(dl) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
   return (Math.atan2(y, x) / k + 360) % 360;
 }
+const norm180 = a => ((a % 360) + 540) % 360 - 180;   // a (-180, 180]; + = derecha
+// Salidas del poste: de dónde llega la línea, hacia dónde sigue la principal y cada derivación con su ángulo.
+// La principal es la que el usuario eligió (sigueA) o, si no, la más recta.
+// El ángulo de cada derivación se mide contra la línea principal que sigue; el lado es en el sentido de avance.
+function salidas(l, p, sigueA = p.sigueA) {
+  const a = padre(l, p), hs = hijos(l, p);
+  const vec = [a, ...hs].filter(Boolean);
+  if (vec.length < 2) return null;
+  let ref = a;
+  if (!ref) { // inicio de línea con varias salidas: la referencia es el par más recto
+    let mejor = 999;
+    for (let i = 0; i < vec.length; i++) for (let j = i + 1; j < vec.length; j++) {
+      const d = 180 - Math.abs(norm180(rumbo(p, vec[i]) - rumbo(p, vec[j])));
+      if (d < mejor) { mejor = d; ref = vec[i]; }
+    }
+  }
+  const avance = rumbo(ref, p);
+  const otros = vec.filter(x => x !== ref).map(x => ({ poste: x, rel: norm180(rumbo(p, x) - avance), vano: dist([p.lat, p.lon], [x.lat, x.lon]) }));
+  otros.sort((u, v) => Math.abs(u.rel) - Math.abs(v.rel));
+  const elegido = otros.findIndex(o => o.poste.id === sigueA);
+  if (elegido > 0) otros.unshift(otros.splice(elegido, 1)[0]);
+  const [principal, ...derivs] = otros;
+  derivs.sort((u, v) => u.poste.numero - v.poste.numero);
+  for (const d of derivs) d.ang = norm180(d.rel - principal.rel);
+  return { ref, principal, derivs, elegido: elegido >= 0 };
+}
+const ladoTxt = ang => Math.abs(ang) < 0.5 || Math.abs(ang) > 179.5 ? "" : ang > 0 ? " a la derecha" : " a la izquierda";
+const textoDeriv = d => `${d.poste.nombre}: ${Math.round(Math.abs(d.ang))}°${ladoTxt(d.ang)} · vano ${d.vano.toFixed(1)} m`;
 // paso: la línea pasa por el poste (ángulo de deflexión); derivación: 3 o más conexiones; remate: fin de línea
 function geometria(l, p) {
   const vec = [padre(l, p), ...hijos(l, p)].filter(Boolean);
   if (!vec.length) return null;
   if (vec.length === 1) return { tipo: "remate", conexiones: 1 };
-  const r = vec.map(x => rumbo(p, x));
-  let defl = 180;
-  for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) {
-    let a = Math.abs(r[i] - r[j]) % 360; if (a > 180) a = 360 - a;
-    defl = Math.min(defl, 180 - a);
-  }
-  return { tipo: vec.length > 2 ? "derivacion" : "paso", angulo: defl, conexiones: vec.length };
+  const s = salidas(l, p);
+  return { tipo: vec.length > 2 ? "derivacion" : "paso", angulo: Math.abs(s.principal.rel), conexiones: vec.length, salidas: s };
 }
 function textoAngulo(g) {
   if (!g) return "";
@@ -538,9 +565,15 @@ function sugerencias(l, p) {
   else {
     const a = g.angulo, d = g.tipo === "derivacion";
     nums = a <= 5 ? [d ? "7" : "1"] : a <= 30 ? [d ? "8" : "2"] : a <= 60 ? (d ? ["9"] : ["3", "5"]) : (d ? ["6A", "6B"] : ["6"]);
+    var base = a <= 5 ? ["1"] : a <= 30 ? ["2"] : a <= 60 ? ["3", "5"] : ["6"];
     neutro = d ? ["B-I-7"] : a <= 30 ? ["B-I-1"] : a <= 60 ? ["B-I-5"] : ["B-I-6"];
   }
-  return { g, prim: seriesPoste(l, p).flatMap(s => nums.map(n => `${s}-${n}`)).filter(c => EST_DESC[c]), neutro: neutro.filter(c => EST_DESC[c]) };
+  // si la serie no tiene versión con derivación (p. ej. A-I-6A), se sugiere la estructura base
+  const prim = seriesPoste(l, p).flatMap(s => {
+    const c = nums.map(n => `${s}-${n}`).filter(x => EST_DESC[x]);
+    return c.length || !base ? c : base.map(n => `${s}-${n}`).filter(x => EST_DESC[x]);
+  });
+  return { g, prim, neutro: neutro.filter(c => EST_DESC[c]) };
 }
 
 // ---- Coordenadas UTM (WGS84). Honduras está en la zona 16N.
@@ -612,8 +645,11 @@ function filasExport(l, p) {
   if (a && textoCable(p)) f.push(["Cable del vano", textoCable(p)]);
   const g = geometria(l, p);
   if (g) f.push(["Ángulo de línea", textoAngulo(g)]);
-  const hs = hijos(l, p);
-  if (hs.length > 1) f.push(["Derivan", hs.map(h => h.nombre).join(", ")]);
+  if (g?.tipo === "derivacion") {
+    const s = g.salidas;
+    f.push(["Línea principal", `${s.ref.nombre} → ${p.nombre} → ${s.principal.poste.nombre}`]);
+    f.push(["Derivaciones", s.derivs.map(textoDeriv).join("; ")]);
+  }
   if (p.fotos.length) f.push(["Fotos", p.fotos.map((_, i) => nombreFoto(p, i)).join(", ")]);
   return f.map(([k, v]) => [k, String(v)]);
 }
@@ -883,7 +919,7 @@ async function verPoste(p) {
     <p class="mono" style="font-size:.85rem">${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}${p.precision != null ? ` · ±${Math.round(p.precision)} m` : " · marcado en el mapa"}<br>UTM ${textoUTM(p.lat, p.lon)}</p>
     ${v != null ? `<p class="nota">Vano desde ${esc(a.nombre)}: <span class="mono">${v.toFixed(1)} m</span>${textoCable(p) ? `<br><span style="font-weight:500">Cable: ${esc(textoCable(p))}</span>` : ""}</p>` : `<p class="nota">Inicio de línea</p>`}
     ${g ? `<p class="nota">Ángulo de línea: ${esc(textoAngulo(g))}</p>` : ""}
-    ${hs.length > 1 ? `<p class="nota">Derivan: ${esc(hs.map(x => x.nombre).join(", "))}</p>` : ""}
+    ${g?.tipo === "derivacion" ? bloqueDerivaciones(g.salidas, p) : ""}
     <dl class="det">${detalles(p).map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>
     ${p.fotos.length ? `<div class="miniaturas">${p.fotos.map(id => `<img data-foto="${esc(id)}" alt="Foto del poste">`).join("")}</div>` : ""}
     <div class="botones"><button class="btn sec" id="d-borrar">Eliminar</button><button class="btn sec" id="d-mover">Mover</button><button class="btn sec" id="d-wa">WhatsApp</button><button class="btn pri" id="d-editar">Editar</button></div>`);
@@ -908,6 +944,13 @@ async function verPoste(p) {
     await guardar(); dibujar();
   };
   cargarMiniaturas(h);
+}
+
+function bloqueDerivaciones(s, p) {
+  return `<div class="deriv">
+    <div class="deriv-fila"><span class="deriv-t">Principal</span><span>${esc(s.ref.nombre)} → ${esc(p.nombre)} → ${esc(s.principal.poste.nombre)} · ${Math.round(Math.abs(s.principal.rel))}°</span></div>
+    ${s.derivs.map(d => `<div class="deriv-fila"><span class="deriv-t">Derivación</span><span><b>${esc(d.poste.nombre)}</b>: <b class="mono">${Math.round(Math.abs(d.ang))}°</b>${ladoTxt(d.ang)} · vano ${d.vano.toFixed(1)} m</span></div>`).join("")}
+  </div>`;
 }
 
 function listaPostes() {
@@ -996,7 +1039,7 @@ function abrirForm(p, nuevo) {
   fPoste = p; fNuevo = nuevo;
   fs = { tipoPoste: p.tipoPoste, unidadAltura: p.unidadAltura, estado: p.estado, fases: p.fases,
     retenidas: p.retenidas, lamparas: p.lamparas, cuchillas: p.cuchillas,
-    primarias: [...(p.primarias || [])], secundarias: [...(p.secundarias || [])], cableFases: p.cableFases || "" };
+    primarias: [...(p.primarias || [])], secundarias: [...(p.secundarias || [])], cableFases: p.cableFases || "", sigueA: p.sigueA || null };
   fFotos = [...p.fotos]; fFotosNuevas = [];
   $("#f-titulo").textContent = nuevo ? "Nuevo poste" : "Editar poste";
   $("#f-coords").textContent = `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}` + (p.precision != null ? `  ±${Math.round(p.precision)} m` : "  (mapa)");
@@ -1034,13 +1077,19 @@ function actualizarConexion() {
 // Cuadro con el ángulo de la línea y las estructuras ENEE sugeridas
 function renderAngulo() {
   const box = IN("angulo");
-  const tmp = { ...fPoste, conectadoA: conexionForm(), primarias: fs.primarias };
+  const tmp = { ...fPoste, conectadoA: conexionForm(), primarias: fs.primarias, sigueA: fs.sigueA };
   const { g, prim, neutro } = sugerencias(lev, tmp);
   if (!g) { box.hidden = true; return; }
   box.hidden = false;
   const finProvisional = g.tipo === "remate" && !hijos(lev, tmp).length && fNuevo;
   const chip = (c, campo) => `<button type="button" data-sug="${esc(c)}" data-campo-sug="${campo}" title="${esc(EST_DESC[c] || "")}" aria-pressed="${fs[campo].includes(c)}">+ ${esc(c)}</button>`;
+  const s = g.tipo === "derivacion" ? g.salidas : null;
   box.innerHTML = `<div><b>Ángulo de la línea:</b> ${esc(textoAngulo(g))}</div>` +
+    (s ? bloqueDerivaciones(s, tmp) +
+      `<label class="campo">La línea principal sigue hacia<select id="f-sigue">
+        <option value="">Automático (la más recta: ${esc(salidas(lev, tmp, null).principal.poste.nombre)})</option>
+        ${[s.principal, ...s.derivs].map(o => o.poste).sort((x, y) => x.numero - y.numero).map(x => `<option value="${esc(x.id)}"${fs.sigueA === x.id ? " selected" : ""}>${esc(x.nombre)}</option>`).join("")}
+      </select></label>` : "") +
     (finProvisional ? `<div class="sug-nota">Por ahora es el final de la línea. El ángulo se calcula cuando marques el poste siguiente.</div>` : "") +
     (prim.length ? `<div class="sug-fila"><span>Primaria sugerida</span><div class="chips">${prim.map(c => chip(c, "primarias")).join("")}</div></div>` : "") +
     (neutro.length ? `<div class="sug-fila"><span>Neutro sugerido</span><div class="chips">${neutro.map(c => chip(c, "secundarias")).join("")}</div></div>` : "");
@@ -1140,6 +1189,7 @@ async function guardarForm(e) {
     cuchillas: fs.cuchillas, tipoCuchilla: fs.cuchillas > 0 ? IN("tipoCuchilla").value.trim() : "",
     estado: fs.estado, obs: IN("obs").value.trim(), fotos: [...fFotos],
     conectadoA: conexionForm(),
+    sigueA: fs.sigueA || null,
     cableFases: fs.cableFases || "", cableMT: IN("cableMT").value.trim(), cableN: IN("cableN").value.trim(), cableBT: IN("cableBT").value.trim(),
   });
   if (fNuevo) lev.postes.push(p);
@@ -1241,6 +1291,12 @@ function dxf(l) {
     g(0, "SEQEND", 8, capa);
   };
   const xs = [], ys = [];
+  // ángulo de cada derivación: se escribe junto a la distancia de su primer vano
+  const angDeriv = new Map();
+  for (const p of o) {
+    const geo = geometria(l, p);
+    if (geo?.tipo === "derivacion") for (const d of geo.salidas.derivs) angDeriv.set(p.id + ">" + d.poste.id, `Der ${Math.round(Math.abs(d.ang))}%%d ${d.ang > 0 ? "D" : "I"}`);
+  }
   // vanos: línea, distancia arriba y cable abajo, alineados con el vano
   for (const [a, b] of vanos(l)) {
     const [x1, y1] = P(a), [x2, y2] = P(b);
@@ -1249,6 +1305,8 @@ function dxf(l) {
     if (ang > 90) ang -= 180; if (ang <= -90) ang += 180;
     const r = ang * Math.PI / 180, nx = -Math.sin(r), ny = Math.cos(r), mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
     texto("VANOS", mx + nx * 0.8, my + ny * 0.8, 1.2, `${dist([a.lat, a.lon], [b.lat, b.lon]).toFixed(1)} m`, ang, true);
+    const der = angDeriv.get(a.id + ">" + b.id);
+    if (der) texto("ANGULOS", mx + nx * 2.6, my + ny * 2.6, 1.2, der, ang, true);
     if (textoCable(b)) texto("CABLES", mx - nx * 2.0, my - ny * 2.0, 1.0, textoCable(b), ang, true);
   }
   // postes: círculo, nombre y estructuras
@@ -1263,13 +1321,16 @@ function dxf(l) {
       `${p.tipoPoste}${p.altura != null ? ` ${numFmt(p.altura)} ${p.unidadAltura}` : ""}`,
     ].filter(Boolean);
     lineas.forEach((t, i) => texto("ESTRUCTURAS", x + 1.5, y - 1.0 - i * 1.6, 1.2, t));
+    const geo = geometria(l, p);
+    if (geo && geo.tipo !== "remate") texto("ANGULOS", x + 1.5, y + 3.6, 1.2, `Ang ${Math.round(geo.angulo)}%%d`);
+
     if (p.transformador) {
       polilinea("TRANSFORMADORES", [[x - 3.5, y - 3.6], [x - 1.5, y - 3.6], [x - 2.5, y - 1.8]], true);
       texto("TRANSFORMADORES", x - 2.5, y - 5.4, 1.2, ["TR", p.kva && `${p.kva} kVA`, p.fases].filter(Boolean).join(" "), 0, true);
     }
   }
   if (l.recorrido.length > 1) polilinea("RECORRIDO", l.recorrido.map(t => P([t[0], t[1]])));
-  const capas = [["POSTES", 7], ["NOMBRES", 3], ["ESTRUCTURAS", 5], ["LINEA_MT", 1], ["VANOS", 4], ["CABLES", 6], ["TRANSFORMADORES", 30], ["RECORRIDO", 8]];
+  const capas = [["POSTES", 7], ["NOMBRES", 3], ["ESTRUCTURAS", 5], ["LINEA_MT", 1], ["VANOS", 4], ["CABLES", 6], ["ANGULOS", 2], ["TRANSFORMADORES", 30], ["RECORRIDO", 8]];
   const H = [];
   const h = (...pares) => { for (let i = 0; i < pares.length; i += 2) H.push(String(pares[i]), String(pares[i + 1])); };
   const mx = Math.min(...xs) - 20, my = Math.min(...ys) - 20, Mx = Math.max(...xs) + 20, My = Math.max(...ys) + 20;
@@ -1590,6 +1651,7 @@ function enlazar() {
   });
   IN("trafo").onchange = renderForm;
   IN("conexion").onchange = actualizarConexion;
+  $("#form").addEventListener("change", e => { if (e.target.id === "f-sigue") { fs.sigueA = e.target.value || null; renderAngulo(); } });
   // al elegir un código del catálogo, se agrega a la lista del poste
   for (const [campo, id] of Object.entries(ENTRADA_ESTR)) IN(id).addEventListener("change", () => agregarEstr(campo));
   $("#f-btn-cam").onclick = () => IN("cam").click();
