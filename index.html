@@ -190,7 +190,7 @@ button{cursor:pointer}
   </header>
   <div id="lista-levs" class="lista"></div>
   <button id="btn-nuevo" class="btn pri fab-ext" type="button">+ Nuevo levantamiento</button>
-  <input type="file" id="in-importar" accept=".json,application/json" hidden>
+  <input type="file" id="in-importar" accept=".zip,.json,application/zip,application/json" hidden>
 </section>
 
 <section id="v-mapa" class="vista" hidden>
@@ -378,9 +378,15 @@ const plugin = n => window.Capacitor?.Plugins?.[n] || window.Capacitor?.register
 async function compartirNativo({ archivos = [], texto = "", titulo = "" }) {
   const Filesystem = plugin("Filesystem"), Share = plugin("Share");
   const uris = [];
+  const PARTE = 3 * 1024 * 1024; // múltiplo de 3 para que cada pedazo en base64 quede completo
   for (const f of archivos) {
-    const data = (await blobADataURL(f)).split(",")[1];
-    const r = await Filesystem.writeFile({ path: "compartir/" + f.name, data, directory: "CACHE", recursive: true });
+    const path = "compartir/" + f.name;
+    let r = null;
+    for (let i = 0; i < Math.max(f.size, 1); i += PARTE) {
+      const data = (await blobADataURL(f.slice(i, i + PARTE))).split(",")[1] || "";
+      if (i === 0) r = await Filesystem.writeFile({ path, data, directory: "CACHE", recursive: true });
+      else await Filesystem.appendFile({ path, data, directory: "CACHE" });
+    }
     uris.push(r.uri);
   }
   try {
@@ -1011,9 +1017,16 @@ function renderCalidad() {
     `<button type="button" data-calidad="${k}" aria-pressed="${k === calidad}">${v.txt}</button>`).join("");
   IN("calidad-ayuda").textContent = CALIDADES[calidad].ayuda;
 }
-function reducirFoto(file) {
+// Copia la foto a memoria: en Android, guardar directo el archivo de la cámara/galería
+// falla con fotos pesadas ("Failed to write blobs").
+async function aMemoria(b) { return new Blob([await b.arrayBuffer()], { type: b.type || "image/jpeg" }); }
+async function reducirFoto(file) {
+  const { max } = CALIDADES[calidad];
+  const b = max ? await reducirCanvas(file) : file;
+  return aMemoria(b);
+}
+function reducirCanvas(file) {
   const { max, q } = CALIDADES[calidad];
-  if (!max) return Promise.resolve(file);
   return new Promise(res => {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => {
@@ -1157,7 +1170,11 @@ async function agregarFotos(files) {
       const id = uid();
       await DB.put("fotos", { id, levId: lev.id, blob });
       fFotos.push(id); fFotosNuevas.push(id);
-    } catch (e) { toast("No se pudo guardar la foto: " + e.message); }
+    } catch (e) {
+      const lleno = e?.name === "QuotaExceededError" || /quota|space|espacio/i.test(e?.message || "");
+      toast(lleno ? "El teléfono no tiene espacio para más fotos. Exporta y libera espacio, o usa calidad Normal."
+                  : "No se pudo guardar la foto (" + (e?.message || e) + "). Prueba con calidad Normal.");
+    }
   }
   renderFotosForm();
   if (files.length) toast(`Foto ${fFotos.length} agregada. Toca "+ Tomar foto" para otra.`);
@@ -1427,9 +1444,9 @@ async function generarArchivo(f) {
   else if (f === "kmz") blob = await kmz(lev);
   else if (f === "fotos") blob = await zipFotos(lev);
   else if (f === "dxf") blob = new Blob([dxf(lev)], { type: "application/dxf" });
-  else blob = new Blob([await respaldo(lev)], { type: "application/json" });
-  const ext = f === "json" ? "json" : f === "fotos" ? "zip" : f;
-  return { blob, nombre: (f === "fotos" ? "Fotos_" : "") + nombreArchivo(lev, ext) };
+  else blob = await respaldo(lev);
+  const ext = f === "json" || f === "fotos" ? "zip" : f;
+  return { blob, nombre: (f === "fotos" ? "Fotos_" : f === "json" ? "Respaldo_" : "") + nombreArchivo(lev, ext) };
 }
 
 async function compartirWhatsApp(texto, archivos = []) {
@@ -1447,9 +1464,13 @@ async function compartirWhatsApp(texto, archivos = []) {
 
 function blobADataURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
 async function respaldo(l) {
-  const fotos = {};
-  for (const p of l.postes) for (const id of p.fotos) { const rec = await DB.get("fotos", id); if (rec) fotos[id] = await blobADataURL(rec.blob); }
-  return JSON.stringify({ app: "levantamiento-mt", version: 1, lev: l, fotos });
+  const zip = new JSZip(), fotos = [];
+  for (const p of l.postes) for (const id of p.fotos) {
+    const rec = await DB.get("fotos", id);
+    if (rec) { zip.file(`fotos/${id}.jpg`, rec.blob, { compression: "STORE" }); fotos.push(id); }
+  }
+  zip.file("respaldo.json", JSON.stringify({ app: "levantamiento-mt", version: 2, lev: l, fotos }));
+  return zip.generateAsync({ type: "blob", mimeType: "application/zip" });
 }
 
 function nombreArchivo(l, ext) {
@@ -1489,7 +1510,7 @@ function menuExportar() {
       <button data-f="dxf"><b>AutoCAD (DXF)</b><span>Plano en coordenadas UTM ${utm(lev.postes[0]?.lat ?? 14, lev.postes[0]?.lon ?? -87).zona}N, en metros: postes, línea, vanos, cables y estructuras por capas</span></button>
       <button data-f="kml"><b>KML</b><span>Google Earth, QGIS, AutoCAD Map, Global Mapper</span></button>
       <button data-f="gpx"><b>GPX</b><span>GPS de mano, apps de navegación</span></button>
-      <button data-f="json"><b>Respaldo completo</b><span>Para guardar o pasar a otro teléfono (incluye fotos)</span></button>
+      <button data-f="json"><b>Respaldo completo (.zip)</b><span>Para guardar o pasar a otro teléfono (incluye fotos). Se abre con "Importar respaldo"</span></button>
     </div>
     <h2 style="margin-top:18px">Enviar por WhatsApp</h2>
     <div class="chips" style="margin-bottom:10px">
@@ -1537,17 +1558,34 @@ function menuExportar() {
 
 async function importarRespaldo(file) {
   try {
-    const d = JSON.parse(await file.text());
+    toast("Abriendo respaldo…");
+    const cabeza = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+    const esZip = cabeza[0] === 0x50 && cabeza[1] === 0x4b; // "PK"
+    let d, zip = null;
+    if (esZip) {
+      zip = await JSZip.loadAsync(file);
+      const j = zip.file("respaldo.json");
+      if (!j) throw new Error("el .zip no es un respaldo de esta app (¿es la carpeta de fotos?)");
+      d = JSON.parse(await j.async("string"));
+    } else d = JSON.parse(await file.text());
     if (d.app !== "levantamiento-mt" || !d.lev?.id) throw new Error("no es un respaldo de esta app");
     const existe = await DB.get("levs", d.lev.id);
     if (existe && !await confirmar("Ya existe este levantamiento", `"${existe.nombre}" se reemplazará con el respaldo.`, "Reemplazar", true)) return;
-    for (const [id, dataUrl] of Object.entries(d.fotos || {})) {
-      const blob = await (await fetch(dataUrl)).blob();
-      await DB.put("fotos", { id, levId: d.lev.id, blob });
+    // Las fotos se guardan una por una para no llenar la memoria del teléfono.
+    const ids = zip ? (d.fotos || []) : Object.keys(d.fotos || {});
+    let n = 0, fallas = 0;
+    for (const id of ids) {
+      try {
+        const blob = zip ? new Blob([await zip.file(`fotos/${id}.jpg`).async("arraybuffer")], { type: "image/jpeg" })
+                         : await (await fetch(d.fotos[id])).blob();
+        if (!zip) d.fotos[id] = null;
+        await DB.put("fotos", { id, levId: d.lev.id, blob });
+      } catch (e) { fallas++; console.warn("Foto no importada", id, e); }
+      if (++n % 5 === 0) toast(`Importando fotos ${n} de ${ids.length}…`);
     }
     (d.lev.postes || []).forEach(normPoste);
     await DB.put("levs", d.lev);
-    toast(`Importado: ${d.lev.nombre}`);
+    toast(`Importado: ${d.lev.nombre}` + (fallas ? ` (${fallas} foto(s) no se pudieron importar)` : ""));
     cargarLista();
   } catch (e) { toast("No se pudo importar: " + e.message); }
 }
