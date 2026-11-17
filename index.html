@@ -186,11 +186,12 @@ button{cursor:pointer}
 <section id="v-lista" class="vista">
   <header class="barra">
     <h1>Levantamientos</h1>
-    <button id="btn-importar" class="btn-txt" type="button">Importar respaldo</button>
+    <button id="btn-importar" class="btn-txt" type="button">Importar respaldo o KMZ</button>
   </header>
   <div id="lista-levs" class="lista"></div>
   <button id="btn-nuevo" class="btn pri fab-ext" type="button">+ Nuevo levantamiento</button>
-  <input type="file" id="in-importar" accept=".zip,.json,application/zip,application/json" hidden>
+  <input type="file" id="in-importar" accept=".zip,.json,.kmz,.kml,application/zip,application/json,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml,image/*" multiple hidden>
+<input type="file" id="in-fotos-rec" accept="image/*" multiple hidden>
 </section>
 
 <section id="v-mapa" class="vista" hidden>
@@ -1587,6 +1588,179 @@ function menuExportar() {
   });
 }
 
+// ------------------------------------------------------------ Recuperar desde KMZ + fotos sueltas
+// Para levantamientos que no se pudieron respaldar: el KMZ que exporta esta app trae los datos de
+// cada poste; las fotos exportadas con "Enviar fotos" se llaman P-001_1.jpg y se vuelven a asignar por nombre.
+const esImagen = f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic)$/i.test(f.name);
+const esKML = f => /\.km[lz]$/i.test(f.name) || /google-earth/.test(f.type);
+let levFotosRec = null;
+async function importarArchivos(files) {
+  const fotos = files.filter(esImagen), otros = files.filter(f => !esImagen(f));
+  let rec = null;
+  for (const f of otros) {
+    if (esKML(f)) rec = await recuperarKMZ(f) || rec;
+    else await importarRespaldo(f);
+  }
+  if (fotos.length) {
+    const l = rec || await elegirLev("¿De qué levantamiento son estas fotos?");
+    if (l) await asignarFotos(fotos, l);
+  } else if (rec) ofrecerFotos(rec);
+}
+function ofrecerFotos(l) {
+  const conFotos = l.postes.filter(p => p._fotosEsperadas?.length).length;
+  const h = abrirHoja(`<h2>Levantamiento recuperado</h2>
+    <p><b>${esc(l.nombre)}</b>: ${l.postes.length} postes${conFotos ? `, ${conFotos} tenían fotos` : ""}.</p>
+    <p>Ahora elige las fotos que sacaste con "Enviar fotos" (se llaman como el poste, por ejemplo P-001_1.jpg). Se ponen solas en su poste.</p>
+    <div class="botones"><button class="btn sec" id="r-luego">Después</button><button class="btn pri" id="r-fotos">Elegir fotos</button></div>`);
+  $("#r-luego", h).onclick = cerrarHoja;
+  $("#r-fotos", h).onclick = () => { levFotosRec = l; cerrarHoja(); $("#in-fotos-rec").click(); };
+}
+async function elegirLev(titulo) {
+  const levs = (await DB.all("levs")).sort((a, b) => String(b.creado).localeCompare(String(a.creado)));
+  if (!levs.length) { toast("Primero importa el KMZ del levantamiento"); return null; }
+  return new Promise(res => {
+    const h = abrirHoja(`<h2>${esc(titulo)}</h2><div class="opciones">${levs.map((l, i) =>
+      `<button data-i="${i}"><b>${esc(l.nombre)}</b><span>${l.postes.length} postes</span></button>`).join("")}</div>`);
+    hojaAlCerrar = () => res(null);
+    $$("[data-i]", h).forEach(b => b.onclick = () => { hojaAlCerrar = null; cerrarHoja(); res(levs[+b.dataset.i]); });
+  });
+}
+function leerFecha(t) {
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(t || "");
+  return m ? new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)).toISOString() : new Date().toISOString();
+}
+// "2 × A-I-1 · Primaria…; B-I-1 · Neutro…" -> ["A-I-1","A-I-1","B-I-1"]
+function leerEstr(t) {
+  const out = [];
+  for (const parte of String(t || "").split(/;\s*/)) {
+    const m = /^\s*(?:(\d+)\s*×\s*)?(.+?)\s*$/.exec(parte);
+    if (!m || !m[2]) continue;
+    const cod = m[2].split(" · ")[0].trim();
+    for (let i = 0; i < (+m[1] || 1); i++) out.push(cod);
+  }
+  return out;
+}
+// "1 · R-1 · Retenida sencilla" -> [1, "R-1"];  "2 · LED" -> [2, "LED"]
+function leerCantTipo(t, esEstr) {
+  const [n, ...r] = String(t || "").split(" · ");
+  let tipo = r.join(" · ").trim();
+  if (esEstr && EST_DESC[r[0]?.trim()]) tipo = r[0].trim();
+  return [parseInt(n) || 0, tipo];
+}
+async function recuperarKMZ(file) {
+  try {
+    toast("Leyendo KMZ…");
+    let texto;
+    const cab = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+    if (cab[0] === 0x50 && cab[1] === 0x4b) {
+      const zip = await JSZip.loadAsync(file);
+      const k = zip.file("doc.kml") || Object.values(zip.files).find(f => /\.kml$/i.test(f.name));
+      if (!k) throw new Error("el KMZ no trae datos");
+      texto = await k.async("string");
+    } else texto = await file.text();
+    const doc = new DOMParser().parseFromString(texto, "application/xml");
+    if (doc.querySelector("parsererror")) throw new Error("el archivo está dañado");
+    const hijo = (el, tag) => [...el.children].find(c => c.localName === tag);
+    const docEl = [...doc.getElementsByTagNameNS("*", "Document")][0] || doc.documentElement;
+    const nombreLev = (hijo(docEl, "name")?.textContent || file.name.replace(/(_\d{8}_\d{4})?\.km[lz]$/i, "")).trim();
+    const desc = hijo(docEl, "description")?.textContent || "";
+    const l = { id: uid(), nombre: nombreLev + " (recuperado)", circuito: (/Circuito\s+(.+)/.exec(desc)?.[1] || "").trim(),
+      prefijo: "P", creado: new Date().toISOString(), postes: [], recorrido: [] };
+    const conexion = new Map(), sigue = new Map();
+    for (const pm of doc.getElementsByTagNameNS("*", "Placemark")) {
+      const coordsEl = pm.getElementsByTagNameNS("*", "coordinates")[0];
+      if (!coordsEl) continue;
+      const puntos = coordsEl.textContent.trim().split(/\s+/).map(c => c.split(",").map(Number)).filter(c => c.length >= 2 && c.every(Number.isFinite));
+      if (pm.getElementsByTagNameNS("*", "LineString")[0]) {
+        if (/recorrido/.test(pm.getElementsByTagNameNS("*", "styleUrl")[0]?.textContent || "")) l.recorrido = puntos.map(c => [c[1], c[0]]);
+        continue;
+      }
+      if (!pm.getElementsByTagNameNS("*", "Point")[0] || !puntos.length) continue;
+      const d = {};
+      for (const x of pm.getElementsByTagNameNS("*", "Data")) d[x.getAttribute("name")] = (x.getElementsByTagNameNS("*", "value")[0]?.textContent || "").trim();
+      const nombre = (hijo(pm, "name")?.textContent || "").trim();
+      const numero = parseInt(d["Número"]) || l.postes.length + 1;
+      const alt = /([\d.]+)\s*(ft|m)\b/.exec(d["Altura"] || "");
+      const [retenidas, tipoRetenida] = leerCantTipo(d["Retenidas"], true);
+      const [lamparas, tipoLampara] = leerCantTipo(d["Lámparas"]);
+      const [cuchillas, tipoCuchilla] = leerCantTipo(d["Cuchillas / protección"]);
+      const tr = d["Transformador"];
+      const kva = /([\d.]+)\s*kVA/i.exec(tr || "")?.[1] || "";
+      const fases = (tr || "").split(" · ").map(t => t.trim()).find(t => OPC.fases.includes(t)) || "";
+      let cableFases = "", cableMT = "", cableN = "", cableBT = "";
+      for (const c of String(d["Cable del vano"] || "").split(" + ").map(t => t.trim()).filter(Boolean)) {
+        if (/^N /.test(c)) cableN = c.slice(2);
+        else if (/^BT /.test(c)) cableBT = c.slice(3);
+        else { const m = /^(1F|2F|3F)\s+(.+)$/.exec(c); if (m) { cableFases = m[1]; cableMT = m[2]; } else cableMT = c; }
+      }
+      const p = normPoste({
+        id: uid(), numero, nombre: nombre || `P-${String(numero).padStart(3, "0")}`,
+        lat: puntos[0][1], lon: puntos[0][0],
+        precision: d["Precisión GPS"] ? parseFloat(d["Precisión GPS"].replace(/[^\d.]/g, "")) || null : null,
+        fecha: leerFecha(d["Fecha"]),
+        tipoPoste: d["Tipo de poste"] || "Concreto", altura: alt ? parseFloat(alt[1]) : null, unidadAltura: alt ? alt[2] : "ft",
+        cableFases, cableMT, cableN, cableBT,
+        primarias: leerEstr(d["Estructuras primarias"] ?? d["Estructura primaria"]),
+        secundarias: leerEstr(d["Estructuras secundarias"] ?? d["Estructura secundaria"]),
+        retenidas, tipoRetenida, lamparas, tipoLampara,
+        transformador: !!tr, kva, fases, cuchillas, tipoCuchilla,
+        estado: OPC.estado.includes(d["Estado"]) ? d["Estado"] : "Bueno", obs: d["Observaciones"] || "", fotos: [],
+        _fotosEsperadas: (d["Fotos"] || "").split(",").map(t => t.trim()).filter(Boolean),
+      });
+      const vano = Object.keys(d).find(k => k.startsWith("Vano desde "));
+      conexion.set(p, vano ? vano.slice(11).trim() : null);
+      const lp = (d["Línea principal"] || "").split("→").map(t => t.trim());
+      if (lp.length === 3) sigue.set(p, lp[2]);
+      l.postes.push(p);
+    }
+    if (!l.postes.length && !l.recorrido.length) throw new Error("no encontré postes en el archivo");
+    const porNombre = new Map(l.postes.map(p => [p.nombre, p]));
+    for (const p of l.postes) {
+      const a = conexion.get(p);
+      p.conectadoA = a ? porNombre.get(a)?.id ?? null : null;
+      p.sigueA = sigue.has(p) ? porNombre.get(sigue.get(p))?.id ?? null : null;
+    }
+    const pref = /^(.*?)-\d+$/.exec(l.postes[0]?.nombre || "");
+    if (pref) l.prefijo = pref[1];
+    await DB.put("levs", l);
+    cargarLista();
+    toast(`Recuperado: ${l.nombre} · ${l.postes.length} postes`);
+    return l;
+  } catch (e) { console.error(e); toast("No se pudo leer el KMZ: " + errTxt(e)); return null; }
+}
+// Pone cada foto en su poste según el nombre: P-001_1.jpg, P-001_2.jpg… (también "P-001_1 (1).jpg").
+async function asignarFotos(files, l) {
+  const clave = p => limpio(p.nombre) || "poste_" + p.numero;
+  const porClave = new Map(l.postes.map(p => [clave(p).toLowerCase(), p]));
+  const nuevas = new Map();
+  let sinPoste = 0, repetidas = 0;
+  for (const f of files) {
+    const m = /^(.+)_(\d+)(?:\s*\(\d+\))?\.[a-z0-9]+$/i.exec(f.name);
+    const p = m && porClave.get(m[1].toLowerCase());
+    if (!p) { sinPoste++; continue; }
+    const lista = nuevas.get(p) || nuevas.set(p, new Map()).get(p);
+    if (lista.has(+m[2])) { repetidas++; continue; }
+    lista.set(+m[2], f);
+  }
+  let n = 0, fallas = 0;
+  for (const [p, lista] of nuevas) {
+    for (const [, f] of [...lista].sort((a, b) => a[0] - b[0])) {
+      try {
+        const id = uid();
+        await DB.put("fotos", { id, levId: l.id, blob: await aMemoria(f) });
+        p.fotos.push(id); n++;
+        if (n % 5 === 0) toast(`Guardando fotos ${n}…`);
+      } catch (e) { fallas++; console.warn(e); }
+    }
+  }
+  for (const p of l.postes) delete p._fotosEsperadas;
+  await DB.put("levs", l);
+  if (lev?.id === l.id) { lev = l; }
+  cargarLista();
+  const extra = [sinPoste && `${sinPoste} sin poste (¿les cambiaron el nombre?)`, repetidas && `${repetidas} repetidas`, fallas && `${fallas} con error`].filter(Boolean).join(", ");
+  toast(`${n} fotos puestas en ${nuevas.size} postes` + (extra ? ` · ${extra}` : ""));
+}
+
 async function importarRespaldo(file) {
   try {
     toast("Abriendo respaldo…");
@@ -1650,7 +1824,8 @@ function enlazar() {
   }
   $("#btn-nuevo").onclick = nuevoLev;
   $("#btn-importar").onclick = () => $("#in-importar").click();
-  $("#in-importar").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importarRespaldo(f); };
+  $("#in-importar").onchange = e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) importarArchivos(fs); };
+  $("#in-fotos-rec").onchange = e => { const fs = [...e.target.files], l = levFotosRec; e.target.value = ""; if (fs.length && l) asignarFotos(fs, l); };
   $("#btn-volver").onclick = () => salirMapa();
   $("#btn-marcar").onclick = () => marcar();
   $("#c-cancelar").onclick = () => salirColocar();
