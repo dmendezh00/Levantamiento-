@@ -375,23 +375,53 @@ const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(
 // cualquier archivo (KMZ, KML, GPX, ZIP) va directo a WhatsApp, Drive, correo, etc.
 const NATIVO = !!window.Capacitor?.isNativePlatform?.();
 const plugin = n => window.Capacitor?.Plugins?.[n] || window.Capacitor?.registerPlugin?.(n);
-async function compartirNativo({ archivos = [], texto = "", titulo = "" }) {
-  const Filesystem = plugin("Filesystem"), Share = plugin("Share");
-  const uris = [];
-  const PARTE = 3 * 1024 * 1024; // múltiplo de 3 para que cada pedazo en base64 quede completo
-  for (const f of archivos) {
-    const path = "compartir/" + f.name;
-    let r = null;
-    for (let i = 0; i < Math.max(f.size, 1); i += PARTE) {
-      const data = (await blobADataURL(f.slice(i, i + PARTE))).split(",")[1] || "";
-      if (i === 0) r = await Filesystem.writeFile({ path, data, directory: "CACHE", recursive: true });
-      else await Filesystem.appendFile({ path, data, directory: "CACHE" });
-    }
-    uris.push(r.uri);
+const errTxt = e => (e && (e.message || e.name)) || String(e || "error desconocido");
+const PARTE = 3 * 1024 * 1024; // múltiplo de 3: cada pedazo en base64 queda completo
+// Escribe un archivo en la caché de la app por partes (un archivo grande de una sola vez agota la memoria).
+async function escribirNativo(f) {
+  const Filesystem = plugin("Filesystem"), path = "compartir/" + f.name;
+  let r = null;
+  for (let i = 0; i < Math.max(f.size, 1); i += PARTE) {
+    const data = (await blobADataURL(f.slice(i, i + PARTE))).split(",")[1] || "";
+    if (i === 0) r = await Filesystem.writeFile({ path, data, directory: "CACHE", recursive: true });
+    else await Filesystem.appendFile({ path, data, directory: "CACHE" });
   }
+  return r.uri;
+}
+// Arma un .zip y lo va escribiendo al teléfono mientras se genera, foto por foto.
+function zipANativo(zip, nombre) {
+  const Filesystem = plugin("Filesystem"), path = "compartir/" + nombre;
+  return new Promise((res, rej) => {
+    let piezas = [], tam = 0, uri = null, cola = Promise.resolve(), fallo = null;
+    const escribir = () => {
+      const b = new Blob(piezas); piezas = []; tam = 0;
+      cola = cola.then(async () => {
+        const data = (await blobADataURL(b)).split(",")[1] || "";
+        if (!uri) uri = (await Filesystem.writeFile({ path, data, directory: "CACHE", recursive: true })).uri;
+        else await Filesystem.appendFile({ path, data, directory: "CACHE" });
+      }).catch(e => { fallo = fallo || e; });
+      return cola;
+    };
+    const st = zip.generateInternalStream({ type: "uint8array", streamFiles: true });
+    st.on("data", d => {
+      piezas.push(d); tam += d.length;
+      if (tam >= PARTE) { st.pause(); escribir().then(() => fallo ? rej(fallo) : st.resume()); }
+    });
+    st.on("error", rej);
+    st.on("end", () => escribir().then(() => fallo ? rej(fallo) : res(uri)));
+    st.resume();
+  });
+}
+async function compartirUris(uris, titulo = "", texto = "") {
+  const Share = plugin("Share");
   try {
     await Share.share({ title: titulo || undefined, text: texto || undefined, files: uris.length ? uris : undefined, dialogTitle: "Compartir" });
   } catch (e) { if (!/cancel/i.test(e?.message || "")) throw e; }
+}
+async function compartirNativo({ archivos = [], texto = "", titulo = "" }) {
+  const uris = [];
+  for (const f of archivos) uris.push(await escribirNativo(f));
+  await compartirUris(uris, titulo, texto);
 }
 
 let toastT;
@@ -1381,12 +1411,12 @@ async function zipFotos(l) {
     const carpeta = raiz.folder(limpio(p.nombre) || "poste_" + p.numero);
     for (let i = 0; i < p.fotos.length; i++) {
       const rec = await DB.get("fotos", p.fotos[i]);
-      if (rec) { carpeta.file(nombreFoto(p, i), rec.blob); total++; }
+      if (rec) { carpeta.file(nombreFoto(p, i), rec.blob, { compression: "STORE" }); total++; }
     }
   }
   raiz.file("lista_postes.csv", "\ufeff" + csv.join("\n"));
   if (!total) throw new Error("no hay fotos en este levantamiento");
-  return zip.generateAsync({ type: "blob", mimeType: "application/zip" });
+  return zip;
 }
 
 async function archivosFoto(postes) {
@@ -1438,15 +1468,15 @@ function guiaWhatsApp(nombre) {
 
 async function generarArchivo(f) {
   await guardar();
-  let blob;
+  let blob = null, zip = null;
   if (f === "gpx") blob = new Blob([gpx(lev)], { type: "application/gpx+xml" });
   else if (f === "kml") blob = new Blob([kml(lev)], { type: "application/vnd.google-earth.kml+xml" });
   else if (f === "kmz") blob = await kmz(lev);
-  else if (f === "fotos") blob = await zipFotos(lev);
+  else if (f === "fotos") zip = await zipFotos(lev);
   else if (f === "dxf") blob = new Blob([dxf(lev)], { type: "application/dxf" });
-  else blob = await respaldo(lev);
+  else zip = await respaldo(lev);
   const ext = f === "json" || f === "fotos" ? "zip" : f;
-  return { blob, nombre: (f === "fotos" ? "Fotos_" : f === "json" ? "Respaldo_" : "") + nombreArchivo(lev, ext) };
+  return { blob, zip, nombre: (f === "fotos" ? "Fotos_" : f === "json" ? "Respaldo_" : "") + nombreArchivo(lev, ext) };
 }
 
 async function compartirWhatsApp(texto, archivos = []) {
@@ -1470,7 +1500,7 @@ async function respaldo(l) {
     if (rec) { zip.file(`fotos/${id}.jpg`, rec.blob, { compression: "STORE" }); fotos.push(id); }
   }
   zip.file("respaldo.json", JSON.stringify({ app: "levantamiento-mt", version: 2, lev: l, fotos }));
-  return zip.generateAsync({ type: "blob", mimeType: "application/zip" });
+  return zip;
 }
 
 function nombreArchivo(l, ext) {
@@ -1479,11 +1509,14 @@ function nombreArchivo(l, ext) {
   return `${base}_${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}.${ext}`;
 }
 
-async function entregar(blob, nombre, compartir) {
+async function entregar({ blob, zip, nombre }, compartir) {
   if (NATIVO) {
-    await compartirNativo({ archivos: [new File([blob], nombre, { type: blob.type || "application/octet-stream" })], titulo: nombre });
+    // En la APK el .zip se escribe por partes directo al teléfono: no se arma completo en memoria.
+    const uri = zip ? await zipANativo(zip, nombre) : await escribirNativo(new File([blob], nombre, { type: blob.type || "application/octet-stream" }));
+    await compartirUris([uri], nombre);
     return;
   }
+  if (zip) blob = await zip.generateAsync({ type: "blob", mimeType: "application/zip" });
   let compartido = false;
   if (compartir) {
     const file = new File([blob], nombre, { type: blob.type || "application/octet-stream" });
@@ -1530,17 +1563,15 @@ function menuExportar() {
     cerrarHoja();
     toast("Preparando archivo…");
     try {
-      const { blob, nombre } = await generarArchivo(f);
-      await entregar(blob, nombre, compartir);
-    } catch (e) { toast("No se pudo exportar: " + e.message); }
+      await entregar(await generarArchivo(f), compartir);
+    } catch (e) { console.error(e); toast("No se pudo exportar: " + errTxt(e)); }
   });
   $$("[data-wf]", h).forEach(b => b.onclick = async () => {
     cerrarHoja();
     toast("Preparando archivo…");
     try {
-      const { blob, nombre } = await generarArchivo(b.dataset.wf);
-      await entregar(blob, nombre, true);
-    } catch (e) { toast("No se pudo preparar: " + e.message); }
+      await entregar(await generarArchivo(b.dataset.wf), true);
+    } catch (e) { console.error(e); toast("No se pudo preparar: " + errTxt(e)); }
   });
   $$("[data-w]", h).forEach(b => b.onclick = async () => {
     const w = b.dataset.w;
@@ -1552,7 +1583,7 @@ function menuExportar() {
       if (!archivos.length) { toast("Todavía no hay fotos en este levantamiento"); return; }
       if (!NATIVO && !navigator.canShare?.({ files: archivos })) { toast("Este navegador no deja compartir fotos directo; usa Carpeta de fotos (.zip)"); return; }
       await compartirWhatsApp(`Fotos · ${lev.nombre}`, archivos);
-    } catch (e) { toast("No se pudo compartir: " + e.message); }
+    } catch (e) { console.error(e); toast("No se pudo compartir: " + errTxt(e)); }
   });
 }
 
