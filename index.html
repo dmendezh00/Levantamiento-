@@ -176,6 +176,9 @@ button{cursor:pointer}
 .contador output{min-width:32px;text-align:center;font:600 1.2rem var(--f-mono)}
 .switch{display:flex;align-items:center;gap:12px;font-weight:500;min-height:44px}
 .switch input{width:24px;height:24px;accent-color:var(--accent)}
+.check{display:flex;align-items:flex-start;gap:10px;min-height:40px;padding:4px 0;line-height:1.35}
+.check input{width:22px;height:22px;flex:none;margin:0;accent-color:var(--accent)}
+.hoja .sec{margin:10px 0;border:1px solid var(--line);border-radius:12px;padding:8px 12px}
 .fotos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .fotos .f{position:relative;aspect-ratio:1;max-width:100%}
 .fotos img{width:100%;height:100%;object-fit:cover;border-radius:10px;background:var(--surface-2)}
@@ -807,9 +810,11 @@ async function cargarLista() {
         <div class="txt"><h3>${esc(l.nombre)}</h3>
         <p>${[l.circuito && "Circuito " + esc(l.circuito), l.postes.length + " postes", fmtDist(longLinea(l)), fmtFecha(l.creado)].filter(Boolean).join(" · ")}</p></div>
       </button>
+      ${levs.length > 1 ? `<button class="icono" data-unir="${esc(l.id)}" aria-label="Unir otro levantamiento a ${esc(l.nombre)}" title="Unir otro levantamiento aquí"><svg viewBox="0 0 24 24"><path d="M6 3v5a6 6 0 0 0 6 6h0a6 6 0 0 0 6-6V3M12 14v7M8 17l4 4 4-4"/></svg></button>` : ""}
       <button class="icono" data-borrar="${esc(l.id)}" aria-label="Eliminar ${esc(l.nombre)}"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
     </div>`).join("");
   $$("[data-abrir]", cont).forEach(b => b.onclick = () => abrirLev(levs.find(l => l.id === b.dataset.abrir)));
+  $$("[data-unir]", cont).forEach(b => b.onclick = () => pedirUnion(levs.find(l => l.id === b.dataset.unir), levs));
   $$("[data-borrar]", cont).forEach(b => b.onclick = async () => {
     const l = levs.find(x => x.id === b.dataset.borrar);
     if (!await confirmar("¿Eliminar levantamiento?", `Se borrarán "${l.nombre}", sus ${l.postes.length} postes y sus fotos. Exporta un respaldo antes si quieres conservarlo.`, "Eliminar", true)) return;
@@ -817,6 +822,94 @@ async function cargarLista() {
     await DB.del("levs", l.id);
     cargarLista();
   });
+}
+
+// ------------------------------------------------------------ Unir levantamientos
+// Mete los postes de B dentro de A (por ejemplo, el proyectado dentro del existente) para tener un solo
+// levantamiento y un solo KMZ. B no se borra. Los postes de B se renumeran después de los de A.
+const MISMO_POSTE_M = 3;   // a menos de esto se considera el mismo poste marcado dos veces
+async function pedirUnion(A, levs) {
+  const otros = levs.filter(l => l.id !== A.id);
+  const h = abrirHoja(`<h2>Unir a "${esc(A.nombre)}"</h2><p>¿Qué levantamiento quieres meter aquí? Sus postes se agregan a este; el original no se borra.</p>
+    <div class="opciones">${otros.map((l, i) => `<button data-i="${i}"><b>${esc(l.nombre)}</b><span>${l.postes.length} postes · ${fmtFecha(l.creado)}</span></button>`).join("")}</div>`);
+  $$("[data-i]", h).forEach(b => b.onclick = () => opcionesUnion(A, otros[+b.dataset.i]));
+}
+function opcionesUnion(A, B) {
+  const pa = ordenados(A), pb = ordenados(B);
+  const cerca = q => { let m = null, d = Infinity; for (const a of pa) { const x = dist([a.lat, a.lon], [q.lat, q.lon]); if (x < d) { d = x; m = a; } } return [m, d]; };
+  // postes de B que ya están en A (marcados dos veces)
+  const dups = pb.map(q => [q, ...cerca(q)]).filter(([, , d]) => d <= MISMO_POSTE_M);
+  const dupIds = new Set(dups.map(([q]) => q.id));
+  // postes de B que empiezan línea: se pueden conectar al poste más cercano de A
+  const inicios = pb.filter(q => !dupIds.has(q.id) && !padre(B, q)).map(q => [q, ...cerca(q)]);
+  const todosExist = pb.every(q => cond(q) === "Existente");
+  const h = abrirHoja(`<h2>Unir "${esc(B.nombre)}"</h2>
+    <p>${pb.length} postes entrarán en <b>${esc(A.nombre)}</b>.</p>
+    <fieldset class="sec"><legend>Condición de esos postes</legend>
+      <label class="check"><input type="radio" name="u-cond" value="Nuevo"${todosExist ? " checked" : ""}><span>Todos como <b>Nuevo (proyectado)</b></span></label>
+      <label class="check"><input type="radio" name="u-cond" value=""${todosExist ? "" : " checked"}><span>Dejar la condición que ya tienen</span></label>
+    </fieldset>
+    ${dups.length ? `<fieldset class="sec"><legend>Postes repetidos</legend>
+      ${dups.map(([q, a, d]) => `<label class="check"><input type="checkbox" data-dup="${esc(q.id)}" checked><span>${esc(q.nombre)} es el mismo que <b>${esc(a.nombre)}</b> (a ${d.toFixed(1)} m): no duplicarlo</span></label>`).join("")}
+    </fieldset>` : ""}
+    ${inicios.length && pa.length ? `<fieldset class="sec"><legend>Dónde arranca la línea</legend>
+      ${inicios.map(([q, a, d]) => `<label class="campo">${esc(q.nombre)} se conecta a<select data-ini="${esc(q.id)}">
+        <option value="">No conectar (inicio de línea)</option>
+        ${pa.map(x => `<option value="${esc(x.id)}"${x === a && d <= 150 ? " selected" : ""}>${esc(x.nombre)} · a ${Math.round(dist([x.lat, x.lon], [q.lat, q.lon]))} m</option>`).join("")}
+      </select></label>`).join("")}
+    </fieldset>` : ""}
+    <div class="botones"><button class="btn sec" id="u-no">Cancelar</button><button class="btn pri" id="u-si">Unir</button></div>`);
+  $("#u-no", h).onclick = cerrarHoja;
+  $("#u-si", h).onclick = async () => {
+    const opts = {
+      condicion: $('[name="u-cond"]:checked', h)?.value || "",
+      dups: new Map(dups.filter(([q]) => $(`[data-dup="${q.id}"]`, h)?.checked).map(([q, a]) => [q.id, a.id])),
+      inicios: new Map($$("[data-ini]", h).map(sel => [sel.dataset.ini, sel.value || null])),
+    };
+    cerrarHoja();
+    try { await unirLevs(A, B, opts); } catch (e) { console.error(e); toast("No se pudo unir: " + errTxt(e)); }
+  };
+}
+async function unirLevs(A0, B, { condicion = "", dups = new Map(), inicios = new Map() } = {}) {
+  toast("Uniendo…");
+  const A = await DB.get("levs", A0.id);           // la versión guardada más reciente
+  const ids = new Map(dups);                       // id en B -> id en A
+  const nombresA = new Set(A.postes.map(p => p.nombre));
+  const prefB = /^(.*?)-\d+$/.exec(B.postes[0]?.nombre || "")?.[1];
+  const renombrar = B.postes.some(q => !dups.has(q.id) && nombresA.has(q.nombre)) || prefB === A.prefijo;
+  let num = sigNumero(A);
+  const nuevos = [];
+  for (const q of ordenados(B)) {
+    if (dups.has(q.id)) continue;
+    const p = JSON.parse(JSON.stringify(q));
+    p.id = uid(); ids.set(q.id, p.id);
+    p.numero = num++;
+    if (renombrar) p.nombre = `${A.prefijo}-${String(p.numero).padStart(3, "0")}`;
+    if (condicion) p.condicion = condicion;
+    nuevos.push([q, p]);
+  }
+  let fotos = 0;
+  const copiar = async lista => { // copia las fotos al levantamiento A (las de B se quedan en B)
+    const out = [];
+    for (const f of lista) { const rec = await DB.get("fotos", f); if (!rec) continue; const id = uid(); await DB.put("fotos", { id, levId: A.id, blob: rec.blob }); out.push(id); fotos++; }
+    return out;
+  };
+  for (const [q, p] of nuevos) {
+    const orig = padre(B, q);
+    p.conectadoA = orig ? ids.get(orig.id) ?? null : (inicios.get(q.id) ?? null);
+    p.sigueA = q.sigueA ? ids.get(q.sigueA) ?? null : null;
+    p.fotos = await copiar(q.fotos);
+    A.postes.push(p);
+  }
+  // fotos del poste repetido: se agregan al poste que ya estaba en A
+  for (const [bid, aid] of dups) {
+    const q = B.postes.find(x => x.id === bid), a = A.postes.find(x => x.id === aid);
+    if (q && a) a.fotos.push(...await copiar(q.fotos));
+  }
+  await DB.put("levs", A);
+  if (lev?.id === A.id) lev = A;
+  await cargarLista();
+  toast(`Listo: ${nuevos.length} postes${dups.size ? ` (${dups.size} repetidos no duplicados)` : ""} y ${fotos} fotos agregados a ${A.nombre}`);
 }
 
 function nuevoLev() {
