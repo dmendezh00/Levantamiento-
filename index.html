@@ -58,6 +58,8 @@ button{cursor:pointer}
 .btn.peligro{background:var(--bad);color:#fff}
 .btn:active{filter:brightness(.92)}
 .btn-txt{border:0;background:none;color:var(--accent);font-weight:600;padding:8px}
+.auto-estado{margin:0;padding:6px 16px;font-size:.8rem;color:var(--muted)}
+.auto-estado.mal{color:#c0392b;font-weight:600}
 
 /* Lista de levantamientos */
 .lista{flex:1;overflow:auto;padding:12px max(16px,var(--safe-r)) calc(100px + var(--safe-b)) max(16px,var(--safe-l));display:flex;flex-direction:column;gap:10px}
@@ -188,6 +190,7 @@ button{cursor:pointer}
     <h1>Levantamientos</h1>
     <button id="btn-importar" class="btn-txt" type="button">Importar respaldo o KMZ</button>
   </header>
+  <p id="auto-estado" class="auto-estado" hidden></p>
   <div id="lista-levs" class="lista"></div>
   <button id="btn-nuevo" class="btn pri fab-ext" type="button">+ Nuevo levantamiento</button>
   <input type="file" id="in-importar" accept=".zip,.json,.kmz,.kml,application/zip,application/json,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml,image/*" multiple hidden>
@@ -379,15 +382,81 @@ const plugin = n => window.Capacitor?.Plugins?.[n] || window.Capacitor?.register
 const errTxt = e => (e && (e.message || e.name)) || String(e || "error desconocido");
 const PARTE = 3 * 1024 * 1024; // múltiplo de 3: cada pedazo en base64 queda completo
 // Escribe un archivo en la caché de la app por partes (un archivo grande de una sola vez agota la memoria).
-async function escribirNativo(f) {
-  const Filesystem = plugin("Filesystem"), path = "compartir/" + f.name;
+async function escribirNativo(f, path = "compartir/" + f.name, directory = "CACHE") {
+  const Filesystem = plugin("Filesystem");
   let r = null;
   for (let i = 0; i < Math.max(f.size, 1); i += PARTE) {
     const data = (await blobADataURL(f.slice(i, i + PARTE))).split(",")[1] || "";
-    if (i === 0) r = await Filesystem.writeFile({ path, data, directory: "CACHE", recursive: true });
-    else await Filesystem.appendFile({ path, data, directory: "CACHE" });
+    if (i === 0) r = await Filesystem.writeFile({ path, data, directory, recursive: true });
+    else await Filesystem.appendFile({ path, data, directory });
   }
   return r.uri;
+}
+
+// ------------------------------------------------------------ Respaldo automático (solo APK)
+// Cada vez que se guarda un levantamiento, se copia a Documentos/LevantamientoMT/<nombre>/:
+// respaldo.json (datos) + <id>.jpg (fotos, cada una se copia una sola vez). Esa carpeta NO se
+// borra al desinstalar la app. Para recuperar: "Importar", entrar a la carpeta y seleccionar todo.
+const AUTO_DIR = "LevantamientoMT";
+const autoPend = new Set(), autoHechas = new Map();
+let autoT = null, autoCorriendo = false, autoAviso = false, autoPermiso = false;
+function instalacion() { // otra carpeta tras reinstalar: Android no deja sobrescribir archivos de la instalación anterior
+  try { let x = localStorage.getItem("instalacion"); if (!x) { x = uid().slice(-4); localStorage.setItem("instalacion", x); } return x; } catch { return "0000"; }
+}
+const carpetaAuto = l => `${AUTO_DIR}/${limpio(l.nombre) || "levantamiento"}_${l.id.slice(-5)}${instalacion()}`;
+function programarRespaldo(l) {
+  if (!NATIVO || !l?.id) return;
+  autoPend.add(l.id);
+  clearTimeout(autoT); autoT = setTimeout(correrRespaldos, 3000);
+}
+async function correrRespaldos() {
+  if (autoCorriendo) { clearTimeout(autoT); autoT = setTimeout(correrRespaldos, 3000); return; }
+  autoCorriendo = true;
+  try {
+    for (const id of [...autoPend]) { autoPend.delete(id); const l = await DB.get("levs", id); if (l) await respaldoAuto(l); }
+  } finally { autoCorriendo = false; }
+}
+async function respaldoAuto(l) {
+  const Filesystem = plugin("Filesystem");
+  try {
+    if (!autoPermiso) { // Android 10 o menos pide permiso de almacenamiento
+      try { const p = await Filesystem.checkPermissions(); if (p.publicStorage !== "granted") await Filesystem.requestPermissions(); } catch {}
+      autoPermiso = true;
+    }
+    const dir = carpetaAuto(l);
+    let hechas = autoHechas.get(l.id);
+    if (!hechas) {
+      hechas = new Set();
+      try { for (const f of (await Filesystem.readdir({ path: dir, directory: "DOCUMENTS" })).files) hechas.add(String(f.name ?? f).replace(/\.jpg$/, "")); } catch {}
+      autoHechas.set(l.id, hechas);
+    }
+    const ids = l.postes.flatMap(p => p.fotos);
+    for (const id of ids) {
+      if (hechas.has(id)) continue;
+      const rec = await DB.get("fotos", id);
+      if (!rec) continue;
+      await escribirNativo(rec.blob, `${dir}/${id}.jpg`, "DOCUMENTS");
+      hechas.add(id);
+    }
+    const json = JSON.stringify({ app: "levantamiento-mt", version: 2, auto: true, guardado: new Date().toISOString(), lev: l, fotos: ids.filter(id => hechas.has(id)) });
+    await Filesystem.writeFile({ path: `${dir}/respaldo.json`, data: json, encoding: "utf8", directory: "DOCUMENTS", recursive: true });
+    try { localStorage.setItem("autoUltimo", new Date().toISOString()); } catch {}
+    estadoAuto();
+  } catch (e) {
+    console.error(e);
+    if (!autoAviso) { autoAviso = true; toast("No se pudo hacer el respaldo automático: " + errTxt(e)); }
+    estadoAuto(e);
+  }
+}
+function estadoAuto(err) {
+  const el = $("#auto-estado");
+  if (!el) return;
+  if (!NATIVO) { el.hidden = true; return; }
+  let u = null; try { u = localStorage.getItem("autoUltimo"); } catch {}
+  el.hidden = false;
+  el.classList.toggle("mal", !!err);
+  el.textContent = err ? "⚠ El respaldo automático falló: " + errTxt(err)
+    : `✓ Respaldo automático en Documentos › ${AUTO_DIR}` + (u ? ` · último ${fmtFechaHora(u)}` : "");
 }
 // Arma un .zip y lo va escribiendo al teléfono mientras se genera, foto por foto.
 function zipANativo(zip, nombre) {
@@ -470,7 +539,7 @@ const DB = (() => {
   return {
     all: s => tx(s, "readonly", st => st.getAll(), m => [...m.values()].map(clon)),
     get: (s, k) => tx(s, "readonly", st => st.get(k), m => m.has(k) ? clon(m.get(k)) : undefined),
-    put: (s, v) => tx(s, "readwrite", st => st.put(v), m => { m.set(v.id, clon(v)); }),
+    put: (s, v) => tx(s, "readwrite", st => st.put(v), m => { m.set(v.id, clon(v)); }).then(r => { if (s === "levs") programarRespaldo(v); return r; }),
     del: (s, k) => tx(s, "readwrite", st => st.delete(k), m => { m.delete(k); }),
     fotosDe: id => tx("fotos", "readonly", st => st.index("lev").getAll(id), m => [...m.values()].filter(f => f.levId === id)),
   };
@@ -1597,10 +1666,13 @@ let levFotosRec = null;
 async function importarArchivos(files) {
   const fotos = files.filter(esImagen), otros = files.filter(f => !esImagen(f));
   let rec = null;
+  const sueltas = new Map(fotos.map(f => [f.name.replace(/\s*\(\d+\)(?=\.)/, ""), f]));
+  let conJson = false;
   for (const f of otros) {
     if (esKML(f)) rec = await recuperarKMZ(f) || rec;
-    else await importarRespaldo(f);
+    else { conJson = conJson || !/\.zip$/i.test(f.name); await importarRespaldo(f, sueltas); }
   }
+  if (conJson) return; // las fotos eran del respaldo automático
   if (fotos.length) {
     const l = rec || await elegirLev("¿De qué levantamiento son estas fotos?");
     if (l) await asignarFotos(fotos, l);
@@ -1761,7 +1833,7 @@ async function asignarFotos(files, l) {
   toast(`${n} fotos puestas en ${nuevas.size} postes` + (extra ? ` · ${extra}` : ""));
 }
 
-async function importarRespaldo(file) {
+async function importarRespaldo(file, sueltas = new Map()) {
   try {
     toast("Abriendo respaldo…");
     const cabeza = new Uint8Array(await file.slice(0, 2).arrayBuffer());
@@ -1777,13 +1849,17 @@ async function importarRespaldo(file) {
     const existe = await DB.get("levs", d.lev.id);
     if (existe && !await confirmar("Ya existe este levantamiento", `"${existe.nombre}" se reemplazará con el respaldo.`, "Reemplazar", true)) return;
     // Las fotos se guardan una por una para no llenar la memoria del teléfono.
-    const ids = zip ? (d.fotos || []) : Object.keys(d.fotos || {});
+    const lista = Array.isArray(d.fotos); // respaldo automático: las fotos vienen como archivos sueltos <id>.jpg
+    const ids = zip || lista ? (d.fotos || []) : Object.keys(d.fotos || {});
+    if (lista && !zip && ids.length && !ids.some(id => sueltas.has(id + ".jpg")))
+      toast("Para traer las fotos, selecciona también los archivos .jpg de la misma carpeta");
     let n = 0, fallas = 0;
     for (const id of ids) {
       try {
-        const blob = zip ? new Blob([await zip.file(`fotos/${id}.jpg`).async("arraybuffer")], { type: "image/jpeg" })
-                         : await (await fetch(d.fotos[id])).blob();
-        if (!zip) d.fotos[id] = null;
+        let blob;
+        if (zip) blob = new Blob([await zip.file(`fotos/${id}.jpg`).async("arraybuffer")], { type: "image/jpeg" });
+        else if (lista) { const f = sueltas.get(id + ".jpg"); if (!f) throw new Error("falta la foto"); blob = await aMemoria(f); }
+        else { blob = await (await fetch(d.fotos[id])).blob(); d.fotos[id] = null; }
         await DB.put("fotos", { id, levId: d.lev.id, blob });
       } catch (e) { fallas++; console.warn("Foto no importada", id, e); }
       if (++n % 5 === 0) toast(`Importando fotos ${n} de ${ids.length}…`);
@@ -1924,7 +2000,10 @@ window.addEventListener("unhandledrejection", e => toast("Error: " + (e.reason?.
   if (!window.L) { document.body.innerHTML = '<p style="padding:24px">Se necesita internet la primera vez para cargar el mapa. Revisa tu conexión y recarga.</p>'; return; }
   enlazar();
   try { await navigator.storage?.persist?.(); } catch {}
-  try { await cargarLista(); }
+  try {
+    await cargarLista();
+    if (NATIVO) { estadoAuto(); for (const l of await DB.all("levs")) programarRespaldo(l); }
+  }
   catch (e) { $("#lista-levs").innerHTML = `<div class="vacio"><b>No se pudo abrir el almacenamiento</b>${esc(e.message)}. Abre la app en Chrome normal (no en modo incógnito).</div>`; }
 })();
 </script>
