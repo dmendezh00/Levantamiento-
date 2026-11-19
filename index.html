@@ -109,6 +109,8 @@ button{cursor:pointer}
 .poste .cb.Cambiar{background:#fab005} .poste .cb.Retirar{background:#e03131;color:#fff}
 .leyenda-c{display:inline-flex;align-items:center;gap:4px;margin-right:8px;white-space:nowrap}
 .leyenda-c i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.sat-img{filter:saturate(1.35) contrast(1.12) brightness(1.06)}
+body.en-sat .leaflet-container{background:#1b1f1d}
 .e-Bueno{background:#2b8a3e} .e-Regular{background:#e67700} .e-Malo{background:#c92a2a} .e-Reemplazar{background:#7048e8}
 .yo{width:18px;height:18px;border-radius:50%;background:#1c7ed6;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25),0 1px 4px rgba(0,0,0,.4)}
 
@@ -789,8 +791,8 @@ function filasExport(l, p) {
 
 // ------------------------------------------------------------ Estado de la app
 let lev = null;          // levantamiento abierto
-let map, capaCalles, capaSat, capaPostes, lineaRec, lineaPostes, lineaNueva, lineaRetiro, yo, circPrec;
-let satelite = false, seguir = true, grabando = false, watchId = null, wakeLock = null;
+let map, capaCalles, capaSat, capaSat2, capaPostes, lineaRec, lineaPostes, lineaNueva, lineaRetiro, yo, circPrec;
+let capaActual = "sat", seguir = true, grabando = false, watchId = null, wakeLock = null;
 let actual = null, precision = null, guardarT = null;
 
 function guardar() { clearTimeout(guardarT); guardarT = null; if (lev) return DB.put("levs", lev).catch(e => toast("No se pudo guardar: " + e.message)); }
@@ -937,6 +939,28 @@ function nuevoLev() {
 }
 
 // ------------------------------------------------------------ Mapa
+// El botón va pasando: Satélite → Satélite nítido → Mapa de calles. Se recuerda la última elección.
+const CAPAS = {
+  sat:   { capa: () => capaSat,    sig: "sat2",  btn: "SAT",   txt: "Satélite (imagen más reciente)" },
+  sat2:  { capa: () => capaSat2,   sig: "calles", btn: "SAT+",  txt: "Satélite nítido (más claro, puede ser más antiguo)" },
+  calles:{ capa: () => capaCalles, sig: "sat",   btn: "MAPA",  txt: "Mapa de calles" },
+};
+function ponerCapa(k, avisar = true) {
+  for (const c of Object.values(CAPAS)) if (c.capa() && map.hasLayer(c.capa())) map.removeLayer(c.capa());
+  CAPAS[k].capa().addTo(map);
+  capaActual = k;
+  try { localStorage.setItem("capa", k); } catch {}
+  const sat = k !== "calles";
+  document.body.classList.toggle("en-sat", sat);
+  // sobre la foto satelital las líneas van más gruesas y más claras para que resalten
+  lineaPostes?.setStyle({ weight: sat ? 4 : 3 });
+  lineaNueva?.setStyle({ color: sat ? "#4dabf7" : COLOR_COND.Nuevo, weight: sat ? 4 : 3 });
+  lineaRetiro?.setStyle({ color: sat ? "#f1f3f5" : COLOR_COND.Retirar, weight: sat ? 4 : 3 });
+  const b = $("#btn-capa"), sig = CAPAS[CAPAS[k].sig];
+  b.textContent = CAPAS[k].btn;
+  b.setAttribute("aria-label", `Vista: ${CAPAS[k].txt}. Tocar para cambiar a ${sig.txt}`);
+  if (avisar) toast(CAPAS[k].txt);
+}
 function iniciarMapa() {
   if (map) return;
   // rotate: girar el mapa con dos dedos (leaflet-rotate). Si la librería no cargó, el mapa funciona sin giro.
@@ -949,13 +973,22 @@ function iniciarMapa() {
   };
   map.on("rotate", aguja);
   capaCalles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, maxNativeZoom: 19, attribution: "© OpenStreetMap" });
-  capaSat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 20, maxNativeZoom: 19, attribution: "Esri World Imagery" });
-  capaCalles.addTo(map);
+  // Satélite con colores realzados (clase "sat-img") y nombres de lugares encima
+  const nombres = () => L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 20, maxNativeZoom: 19, opacity: .9 });
+  capaSat = L.layerGroup([L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 20, maxNativeZoom: 19, className: "sat-img", attribution: "Esri World Imagery" }), nombres()]);
+  // "Nítido": imágenes de archivo de Esri elegidas por ser más claras (a veces más antiguas)
+  capaSat2 = L.layerGroup([L.tileLayer("https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 20, maxNativeZoom: 19, className: "sat-img", attribution: "Esri World Imagery (Clarity)" }), nombres()]);
+  try { capaActual = localStorage.getItem("capa") || "sat"; } catch {}
+  if (!CAPAS[capaActual]) capaActual = "sat";
+  ponerCapa(capaActual, false);
   lineaRec = L.polyline([], { color: cssVar("--track"), weight: 4, opacity: .9 }).addTo(map);
   lineaPostes = L.polyline([], { color: cssVar("--linea"), weight: 3 }).addTo(map);
   lineaNueva = L.polyline([], { color: COLOR_COND.Nuevo, weight: 3, dashArray: "9 7" }).addTo(map);
   lineaRetiro = L.polyline([], { color: COLOR_COND.Retirar, weight: 3, dashArray: "3 7" }).addTo(map);
   capaPostes = L.layerGroup().addTo(map);
+  ponerCapa(capaActual, false); // aplica el estilo de líneas de la vista elegida
   circPrec = L.circle(CENTRO, { radius: 1, color: "#1c7ed6", weight: 1, fillOpacity: .12, interactive: false });
   yo = L.marker(CENTRO, { icon: L.divIcon({ className: "", html: '<div class="yo"></div>', iconSize: [18, 18] }), interactive: false, keyboard: false });
   map.on("dragstart", () => { seguir = false; $("#btn-centrar").classList.remove("on"); });
@@ -2067,12 +2100,7 @@ function enlazar() {
   $("#btn-grabar").onclick = alternarGrabacion;
   $("#btn-lista-postes").onclick = listaPostes;
   $("#btn-exportar").onclick = menuExportar;
-  $("#btn-capa").onclick = () => {
-    satelite = !satelite;
-    map.removeLayer(satelite ? capaCalles : capaSat); (satelite ? capaSat : capaCalles).addTo(map);
-    const b = $("#btn-capa"); b.textContent = satelite ? "MAPA" : "SAT";
-    b.setAttribute("aria-label", satelite ? "Cambiar a mapa de calles" : "Cambiar a vista satelital");
-  };
+  $("#btn-capa").onclick = () => ponerCapa(CAPAS[capaActual].sig);
   $("#btn-norte").onclick = () => {
     if (!map.setBearing) { toast("Gira el mapa con dos dedos"); return; }
     const g = map.getBearing();
